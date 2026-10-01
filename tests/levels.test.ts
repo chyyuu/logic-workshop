@@ -5,11 +5,13 @@ import { validateCircuit } from '../src/model';
 import { referenceCircuit } from './fixtures';
 
 const caseCounts = [2, 4, 2, 4, 4, 4, 4, 8, 8, 4, 16, 512, 16, 256, 4, 8, 32, 512, 16, 256];
+const combinationalLevels = levels.filter(level => level.mode !== 'sequential');
 
 describe('all twenty lesson contracts and legal solutions', () => {
   it('has consecutive ids and enumerates every input exactly once', () => {
-    expect(levels.map(level => level.id)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
-    for (const level of levels) {
+    expect(combinationalLevels.map(level => level.id)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    expect(caseCounts.reduce((total, count) => total + count, 0)).toBe(1672);
+    for (const level of combinationalLevels) {
       const samples = testInputs(level.id);
       expect(samples).toHaveLength(caseCounts[level.id - 1]);
       expect(new Set(samples.map(sample => JSON.stringify(sample))).size).toBe(samples.length);

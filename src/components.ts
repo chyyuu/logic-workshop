@@ -48,8 +48,11 @@ export function encapsulateSelection(circuit:Circuit,nodeIds:string[],name:strin
     }
   }
   const inputs=[...inputMap.values()],outputs=[...outputMap.values()];
-  const interfaceNodes:CircuitNode[]=[...inputs.map((p,i)=>({id:p.id,type:'INPUT' as const,label:p.label,bits:p.bits,position:{x:0,y:i*130}})),
-    ...outputs.map((p,i)=>({id:p.id,type:'OUTPUT' as const,label:p.label,bits:p.bits,position:{x:700,y:i*130}}))];
+  const left=Math.min(...selected.map(n=>n.position.x))-220;
+  const right=Math.max(...selected.map(n=>n.position.x+(n.type==='COMPONENT'||n.type==='DFF'?180:130)))+220;
+  const top=Math.min(...selected.map(n=>n.position.y));
+  const interfaceNodes:CircuitNode[]=[...inputs.map((p,i)=>({id:p.id,type:'INPUT' as const,label:p.label,bits:p.bits,position:{x:left,y:top+i*150}})),
+    ...outputs.map((p,i)=>({id:p.id,type:'OUTPUT' as const,label:p.label,bits:p.bits,position:{x:right,y:top+i*150}}))];
   const graph:CircuitGraph={nodes:[...selected,...interfaceNodes],wires:[...circuit.wires.filter(w=>chosen.has(w.source)&&chosen.has(w.target)),
     ...incoming.map(w=>({...w,id:createId('w'),source:inputMap.get(`${w.source}:${w.sourceHandle}`)!.id,sourceHandle:'out'})),
     ...[...outputMap.entries()].map(([key,p])=>{const w=outgoing.find(w=>`${w.source}:${w.sourceHandle}`===key)!;return{id:createId('w'),source:w.source,sourceHandle:w.sourceHandle,target:p.id,targetHandle:'in'};})]};
@@ -70,22 +73,27 @@ export function expandComponent(circuit:Circuit,instanceId:string,library:Compon
   const error=validateCircuit(circuit,library)[0];if(error)throw new Error(error);
   const instance=circuit.nodes.find(n=>n.id===instanceId);
   if (!instance||instance.type!=='COMPONENT') throw new Error('请选择一个已封装组件。');
-  const def=library[instance.componentKey!]!,nodeMap=new Map(def.graph.nodes.map(n=>[n.id,n]));
+  const def=library[instance.componentKey!]!;
   const internal=def.graph.nodes.filter(n=>n.type!=='INPUT'&&n.type!=='OUTPUT');
   const ids=new Map(internal.map(n=>[n.id,createId('expanded')]));
   const minX=Math.min(0,...internal.map(n=>n.position.x)),minY=Math.min(0,...internal.map(n=>n.position.y));
   const expanded=internal.map(n=>({...structuredClone(n),id:ids.get(n.id)!,position:{x:instance.position.x+n.position.x-minX,y:instance.position.y+n.position.y-minY}}));
-  const incoming=circuit.wires.filter(w=>w.target===instanceId),outgoing=circuit.wires.filter(w=>w.source===instanceId);
-  const wires:Wire[]=circuit.wires.filter(w=>w.source!==instanceId&&w.target!==instanceId);
-  // Substitute each interface endpoint; an unconnected input remains undriven (X).
-  for (const w of def.graph.wires) {
-    const sources=nodeMap.get(w.source)!.type==='INPUT'
-      ? incoming.filter(e=>e.targetHandle===w.source).map(e=>({source:e.source,sourceHandle:e.sourceHandle}))
-      : [{source:ids.get(w.source)!,sourceHandle:w.sourceHandle}];
-    const targets=nodeMap.get(w.target)!.type==='OUTPUT'
-      ? outgoing.filter(e=>e.sourceHandle===w.target).map(e=>({target:e.target,targetHandle:e.targetHandle}))
-      : [{target:ids.get(w.target)!,targetHandle:w.targetHandle}];
-    for (const source of sources) for (const target of targets) wires.push({id:createId('w'),...source,...target});
+  const interfaces=def.graph.nodes.filter(n=>n.type==='INPUT'||n.type==='OUTPUT');
+  for (const boundary of interfaces) ids.set(boundary.id,createId('interface'));
+  // Retain temporary interface vertices while substituting both ends of external wires.
+  // In particular, a component output feeding its own input now joins two boundaries,
+  // rather than retaining an endpoint on the component that is about to disappear.
+  let wires:Wire[]=[...circuit.wires.map(w=>({ ...w,
+    ...(w.source===instanceId?{source:ids.get(w.sourceHandle)!,sourceHandle:'out'}:{}),
+    ...(w.target===instanceId?{target:ids.get(w.targetHandle)!,targetHandle:'in'}:{}),
+  })),...def.graph.wires.map(w=>({...w,id:createId('w'),source:ids.get(w.source)!,target:ids.get(w.target)!}))];
+  // Splice each single-port boundary through its actual driver and fanout. If it has
+  // no driver, its outgoing wires vanish and the internal targets remain X.
+  for (const boundary of interfaces) {
+    const id=ids.get(boundary.id)!,incoming=wires.filter(w=>w.target===id),outgoing=wires.filter(w=>w.source===id);
+    wires=wires.filter(w=>w.source!==id&&w.target!==id);
+    for (const from of incoming) for (const to of outgoing) wires.push({id:createId('w'),
+      source:from.source,sourceHandle:from.sourceHandle,target:to.target,targetHandle:to.targetHandle});
   }
   const next={...circuit,revision:circuit.revision+1,nodes:[...circuit.nodes.filter(n=>n.id!==instanceId),...expanded],wires};
   const nextError=validateCircuit(next,library)[0];if(nextError)throw new Error(nextError);return next;

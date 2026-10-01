@@ -121,6 +121,25 @@ svg { flex-shrink: 0; }
 .wire-value { position: absolute; min-width: 19px; height: 19px; padding: 0 3px; display: grid; place-items: center; background: #f5f7f8; font-family: ui-monospace, Consolas, monospace; font-size: 10px; border-radius: 3px; border: 1px solid #dce4e7; pointer-events: none; }
 .wire-value.chosen { border-color: #18846f; background: #e7f1e9; }
 .test-panel { flex-shrink: 0; background: #fff; border-top: 1px solid var(--border); }
+.clock-count { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: #416e60; padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.timing-tabs { display: flex; gap: 10px; }
+.timing-tabs button { font-size: 10px; color: #8b999f; padding: 5px 0; border-bottom: 2px solid transparent; }
+.timing-tabs button.chosen { color: var(--green); border-bottom-color: var(--green); }
+.timing-help { display: flex; align-items: flex-start; gap: 8px; padding: 11px; background: #f1f7f3; border-radius: 5px; color: #597e6f; font-size: 10px; margin: 14px 0; }
+.timing-help svg { margin-top: 3px; }
+.timing-help p { line-height: 1.7; }
+.scenario-label { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.failure-scenario { color: #976350; font-size: 10px; }
+.timing-waveform { display: flex; padding: 0 20px; max-height: 210px; overflow-y: auto; font-family: ui-monospace, Consolas, monospace; font-size: 10px; }
+.waveform-labels { flex: 0 0 92px; position: sticky; left: 0; background: #fff; z-index: 1; }
+.waveform-labels span { display: flex; align-items: center; justify-content: space-between; height: 32px; padding-right: 10px; border-bottom: 1px solid #eef2f1; }
+.waveform-labels b { font-weight: 550; }.waveform-labels small { font-size: 8px; color: #96a49c; }
+.waveform-scroll { overflow-x: auto; min-width: 0; flex: 1; }
+.timing-waveform text { font: 10px ui-monospace, Consolas, monospace; fill: #668177; }
+.waveform-edge { stroke: #8dafa0; stroke-dasharray: 3 3; }.waveform-observation { stroke: #eef2ef; }
+.waveform-bit { fill: none; stroke: #18846f; stroke-width: 1.7; stroke-linejoin: round; }
+.waveform-bus { fill: #edf7f0; stroke: #cee4d5; }.waveform-unknown { fill: #fff4e5; stroke: #e6c48e; }
+.waveform-empty { color: #94a09b; padding: 32px 22px; font-size: 11px; }
 .test-panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 15px 24px 13px; }
 .test-panel-heading>div { display: flex; align-items: center; gap: 12px; }
 .panel-label { font-size: 12px; font-weight: 600; }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Circuit, ComponentLibrary, Inputs, Simulation } from './contracts';
 
 interface Reply<T> { id: number; result?: T; error?: string; }
@@ -18,12 +18,23 @@ export function backgroundTask<T>(operation: 'judge' | 'verify' | 'load', payloa
 }
 
 const empty: Simulation = { values: {}, portValues: {}, wires: {} };
-export function useSimulation(circuit: Circuit, inputs: Inputs, library: ComponentLibrary) {
+export function useSimulation(circuit: Circuit, inputs: Inputs, library: ComponentLibrary, epoch = 0) {
   const [state, setState] = useState({ ...empty, error: '', pending: true });
   const workerRef = useRef<Worker | null>(null);
   const requestRef = useRef(0);
-  const graphKey = JSON.stringify({ level: circuit.levelId, nodes: circuit.nodes.map(({ position: _position, ...node }) => node), wires: circuit.wires, library });
+  const graphKey = JSON.stringify({ epoch, level: circuit.levelId, nodes: circuit.nodes.map(({ position: _position, ...node }) => node), wires: circuit.wires, library });
   const inputKey = JSON.stringify(inputs);
+  const payloadRef = useRef({ circuit, inputs, library, sessionKey: graphKey });
+  payloadRef.current = { circuit, inputs, library, sessionKey: graphKey };
+  const sentSession = useRef('');
+  const send = useCallback((operation: 'simulate' | 'tick' | 'reset' | 'replay', extra: Record<string, unknown> = {}) => {
+    const payload = payloadRef.current;
+    const changed = sentSession.current !== payload.sessionKey;
+    sentSession.current = payload.sessionKey;
+    const id = ++requestRef.current;
+    setState(previous => ({ ...(changed || operation === 'reset' ? empty : previous), pending: true, error: '' }));
+    workerRef.current?.postMessage({ id, operation, ...payload, ...extra });
+  }, []);
   useEffect(() => {
     const worker = new Worker(new URL('./simulation.worker.ts', import.meta.url), { type: 'module' });
     workerRef.current = worker;
@@ -35,9 +46,10 @@ export function useSimulation(circuit: Circuit, inputs: Inputs, library: Compone
     return () => { worker.terminate(); workerRef.current = null; };
   }, []);
   useEffect(() => {
-    const id = ++requestRef.current;
-    setState({ ...empty, pending: true, error: '' });
-    workerRef.current?.postMessage({ id, operation: 'simulate', circuit, inputs, library });
-  }, [graphKey, inputKey]);
-  return state;
+    send('simulate');
+  }, [graphKey, inputKey, send]);
+  const tick = useCallback(() => send('tick'), [send]);
+  const reset = useCallback(() => send('reset'), [send]);
+  const replay = useCallback((scenarioId: string, stepIndex: number) => send('replay', { scenarioId, stepIndex }), [send]);
+  return { ...state, tick, reset, replay };
 }

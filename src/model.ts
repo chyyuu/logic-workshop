@@ -1,9 +1,10 @@
 import { getLevel } from './levels';
 import { createId } from './id';
+import { hasCombinationalCycle } from './netlist';
 import type { Circuit, CircuitGraph, CircuitNode, ComponentLibrary, GateType, NodeType, Port } from './contracts';
 export type { Circuit, CircuitGraph, CircuitNode, Wire, NodeType } from './contracts';
 
-const gateTypes: GateType[] = ['NAND','NOT','AND','OR','XOR','XNOR','CONST','SPLIT','JOIN'];
+const gateTypes: GateType[] = ['NAND','NOT','AND','OR','XOR','XNOR','CONST','SPLIT','JOIN','DFF'];
 const p = (id: string, bits: number): Port => ({ id, label:id, bits });
 export function getPorts(node: CircuitNode, library: ComponentLibrary = {}): { inputs: Port[]; outputs: Port[] } {
   const bits = node.bits ?? 1;
@@ -14,6 +15,7 @@ export function getPorts(node: CircuitNode, library: ComponentLibrary = {}): { i
   }
   if (node.type === 'INPUT' || node.type === 'CONST') return { inputs:[], outputs:[p('out',bits)] };
   if (node.type === 'OUTPUT') return { inputs:[p('in',bits)], outputs:[] };
+  if (node.type === 'DFF') return { inputs:[p('d',bits),p('rst',1)], outputs:[p('q',bits)] };
   if (node.type === 'SPLIT') return { inputs:[p('in',bits)], outputs:Array.from({length:bits},(_,i)=>p(`out${i}`,1)) };
   if (node.type === 'JOIN') return { inputs:Array.from({length:bits},(_,i)=>p(`in${i}`,1)), outputs:[p('out',bits)] };
   return { inputs:node.type === 'NOT' ? [p('a',bits)] : [p('a',bits),p('b',bits)], outputs:[p('out',bits)] };
@@ -41,12 +43,11 @@ function validateGraph(graph: CircuitGraph, library: ComponentLibrary): string[]
     if (!node.position || !Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) errors.push('组件位置无效。');
     if (typeof node.label!=='string' || node.label.length>160) errors.push('组件标签无效。');
     if (!['INPUT','OUTPUT','COMPONENT',...gateTypes].includes(node.type)) errors.push('组件类型无效。');
-    if (![1,2,4].includes(node.bits??1)) errors.push('端口位宽无效。');
+    if (![1,2,4,8].includes(node.bits??1)) errors.push('端口位宽无效。');
     if (node.type === 'CONST' && (!Number.isInteger(node.value??0)||(node.value??0)<0||(node.value??0)>=2**(node.bits??1))) errors.push('常量超出位宽范围。');
     if (node.type === 'COMPONENT' && !Object.hasOwn(library,node.componentKey??'')) errors.push('组件依赖缺失。');
   }
   const driven = new Set<string>();
-  const adjacency = new Map<string,string[]>();
   for (const wire of graph.wires) {
     const source = nodes.get(wire.source), target = nodes.get(wire.target);
     if (!source || !target) { errors.push('导线连接到不存在的组件。'); continue; }
@@ -59,17 +60,7 @@ function validateGraph(graph: CircuitGraph, library: ComponentLibrary): string[]
     const key = `${wire.target}:${wire.targetHandle}`;
     if (driven.has(key)) errors.push('这个输入端口已经有连接，请先删除原导线。');
     driven.add(key);
-    adjacency.set(wire.source,[...(adjacency.get(wire.source)??[]),wire.target]);
   }
-  const visited=new Set<string>(), active=new Set<string>();
-  function visit(id:string): boolean {
-    if (active.has(id)) return true;
-    if (visited.has(id)) return false;
-    active.add(id);
-    if ((adjacency.get(id)??[]).some(visit)) return true;
-    active.delete(id);visited.add(id);return false;
-  }
-  if (graph.nodes.some(n=>visit(n.id))) errors.push('组合电路不能形成反馈回路。');
   return errors;
 }
 export function validateLibrary(library: ComponentLibrary): string[] {
@@ -81,7 +72,7 @@ export function validateLibrary(library: ComponentLibrary): string[] {
     if (typeof def.id!=='string'||!def.id||!Number.isInteger(def.version)||def.version<1||key!==`${def.id}@${def.version}`||typeof def.name!=='string'||!def.name.trim()||def.name.length>60) errors.push('组件版本或名称无效。');
     if (!Array.isArray(def.inputs)||!Array.isArray(def.outputs)||!Array.isArray(def.dependencies)||!def.graph) { errors.push('组件接口无效。');continue; }
     const interfacePorts=[...def.inputs,...def.outputs];
-    if (!def.outputs.length||interfacePorts.length>32||interfacePorts.some(p=>!p||typeof p.id!=='string'||!p.id||p.id.length>160||p.id.includes(':')||typeof p.label!=='string'||![1,2,4].includes(p.bits))) { errors.push('组件接口无效。');continue; }
+    if (!def.outputs.length||interfacePorts.length>32||interfacePorts.some(p=>!p||typeof p.id!=='string'||!p.id||p.id.length>160||p.id.includes(':')||typeof p.label!=='string'||![1,2,4,8].includes(p.bits))) { errors.push('组件接口无效。');continue; }
     if (new Set(interfacePorts.map(p=>p.id)).size!==interfacePorts.length) errors.push('组件接口无效。');
     const graphErrors=validateGraph(def.graph,library);
     errors.push(...graphErrors);
@@ -111,6 +102,7 @@ export function validateLibrary(library: ComponentLibrary): string[] {
     active.delete(key);const result={nodes,wires,depth};memo.set(key,result);return result;
   }
   for (const [key] of entries) { try { measure(key); } catch (e) { errors.push((e as Error).message);active.clear(); } }
+  if (!errors.length) for (const [,def] of entries) if (hasCombinationalCycle(def.graph,library)) errors.push('组合电路不能形成反馈回路。');
   return [...new Set(errors)];
 }
 export function validateCircuit(circuit: Circuit, library: ComponentLibrary = {}): string[] {
@@ -137,6 +129,7 @@ export function validateCircuit(circuit: Circuit, library: ComponentLibrary = {}
     }
   };
   if (!errors.length) check(circuit,0);
+  if (!errors.length && hasCombinationalCycle(circuit,library)) errors.push('组合电路不能形成反馈回路。');
   for (const n of circuit.nodes) if ((n.type==='INPUT'||n.type==='OUTPUT')&&!fixed.some(f=>f.id===n.id)) errors.push('不允许添加额外的输入输出。');
   return [...new Set(errors)];
 }

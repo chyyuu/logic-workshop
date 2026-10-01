@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import { useEffect, useState } from 'react';
-import { Lightbulb, Power, LockKeyhole, Package, Split, Combine, Hash } from 'lucide-react';
+import { Lightbulb, Power, LockKeyhole, Package, Split, Combine, Hash, MemoryStick } from 'lucide-react';
 import type { NodeType, Signal, Port, GateType } from './contracts';
 
 export interface CircuitNodeData extends Record<string, unknown> {
@@ -13,10 +13,11 @@ export interface CircuitNodeData extends Record<string, unknown> {
 }
 export type FlowNode = Node<CircuitNodeData, 'circuit'>;
 export function nodeDimensions(kind: NodeType, ports: { inputs: Port[]; outputs: Port[] }) {
-  return { width: kind === 'COMPONENT' ? 180 : 130, height: Math.max(106, 46 + Math.max(ports.inputs.length, ports.outputs.length) * 25) };
+  return { width: kind === 'COMPONENT' || kind === 'DFF' ? 180 : 130, height: Math.max(106, 46 + Math.max(ports.inputs.length, ports.outputs.length) * 25) };
 }
 
 export function GateSymbol({ type, small = false }: { type: GateType; small?: boolean }) {
+  if (type === 'DFF') return <MemoryStick className={small ? 'gate-symbol small' : 'gate-symbol'} aria-label="DFF 触发器" />;
   if (type === 'SPLIT' || type === 'JOIN' || type === 'CONST') {
     const Icon = type === 'SPLIT' ? Split : type === 'JOIN' ? Combine : Hash;
     return <Icon className={small ? 'gate-symbol small' : 'gate-symbol'} aria-label={type} />;
@@ -62,7 +63,7 @@ export function CircuitNodeView({ id, data, selected }: NodeProps<FlowNode>) {
       title={`${data.label}.${p.label} · ${p.bits} bit · ${v}`} role="button" tabIndex={0}
       onClick={event => { event.stopPropagation(); data.onPort(id, p.id, direction); }}
       onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); data.onPort(id, p.id, direction); } }}>
-      {(total > 2 || data.kind === 'COMPONENT') && <span className={`port-label ${direction}`}>{p.label}</span>}
+      {(total > 2 || data.kind === 'COMPONENT' || data.kind === 'DFF') && <span className={`port-label ${direction}`}>{p.label}</span>}
     </Handle>;
   };
   return <div style={dimensions} className={`circuit-node ${isInput || isOutput ? 'io-node' : 'gate-node'} ${signalClass(data.value)} ${selected ? 'selected' : ''} ${data.failed ? 'failed-node' : ''}`}
@@ -72,7 +73,7 @@ export function CircuitNodeView({ id, data, selected }: NodeProps<FlowNode>) {
       <Power size={15} /><span>{data.value}</span><span className="switch-track"><i /></span>
     </button> : <BusInput id={id} data={data} />
       : isOutput ? <div className="lamp-value"><Lightbulb size={24} strokeWidth={1.7} /><strong data-testid={`output-${id}`}>{data.value}</strong></div>
-      : <div className={`gate-body ${data.kind === 'COMPONENT' ? 'component-body' : ''} ${data.kind === 'SPLIT' || data.kind === 'JOIN' ? 'bus-body' : ''}`}>{data.kind === 'COMPONENT' ? <Package size={24} /> : <GateSymbol type={data.kind as GateType} />}<span className="node-signal">{data.value}</span></div>}
+      : <div className={`gate-body ${data.kind === 'COMPONENT' || data.kind === 'DFF' ? 'component-body' : ''} ${data.kind === 'SPLIT' || data.kind === 'JOIN' ? 'bus-body' : ''}`}>{data.kind === 'COMPONENT' ? <Package size={24} /> : <GateSymbol type={data.kind as GateType} />}<span className="node-signal">{data.value}</span></div>}
     {data.ports.inputs.map((p, i) => port(p, 'input', i, data.ports.inputs.length))}
     {data.ports.outputs.map((p, i) => port(p, 'output', i, data.ports.outputs.length))}
     {(isInput || isOutput) && <span className="fixed-marker" title="关卡固定端口"><LockKeyhole size={9} /></span>}

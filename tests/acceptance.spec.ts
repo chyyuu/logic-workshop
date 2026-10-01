@@ -10,7 +10,7 @@ test.setTimeout(90_000);
 const browserErrors = new WeakMap<Page, string[]>();
 
 function completedWorkspace(current: number): Workspace {
-  const state: Workspace = { version: 2, currentLevel: current, library: {}, proofs: {},
+  const state: Workspace = { version: 3, currentLevel: current, library: {}, proofs: {},
     circuits: Object.fromEntries(levels.map(level => [level.id, createCircuit(level.id)])),
     inputs: Object.fromEntries(levels.map(level => [level.id, Object.fromEntries(level.inputs.map(name => [name, 0]))])) };
   for (const level of levels) {
@@ -58,7 +58,7 @@ test('all twenty proofs import and a 512-case worker run keeps inputs and animat
     previous = id;
   }
   await importWorkspace(page, state);
-  await expect(page.getByTestId('progress-count')).toContainText('20 / 20');
+  await expect(page.getByTestId('progress-count')).toContainText(`${levels.length} / ${levels.length}`);
   await expect.poll(() => page.locator('.react-flow__viewport').evaluate(element => new DOMMatrix(getComputedStyle(element).transform).a)).toBeLessThan(0.25);
   await page.evaluate(() => {
     const probe = { activeFrames: 0, running: true };

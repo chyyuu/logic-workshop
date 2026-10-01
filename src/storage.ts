@@ -5,7 +5,7 @@ import type { Circuit, CircuitGraph, CircuitNode, ComponentDefinition, Component
 
 export const STORAGE_KEY = 'logic-workshop.v1';
 export interface Workspace {
-  version: 2;
+  version: 3;
   currentLevel: number;
   circuits: Record<number, Circuit>;
   proofs: Record<number, Circuit>;
@@ -14,16 +14,16 @@ export interface Workspace {
 }
 
 export function createWorkspace(): Workspace {
-  return { version: 2, currentLevel: 1, proofs: {}, library: {},
+  return { version: 3, currentLevel: 1, proofs: {}, library: {},
     circuits: Object.fromEntries(levels.map(level => [level.id, createCircuit(level.id)])),
     inputs: Object.fromEntries(levels.map(level => [level.id, Object.fromEntries(level.inputs.map(name => [name, 0]))])) };
 }
 
-const nodeTypes: NodeType[] = ['INPUT', 'OUTPUT', 'NAND', 'NOT', 'AND', 'OR', 'XOR', 'XNOR', 'CONST', 'SPLIT', 'JOIN', 'COMPONENT'];
+const nodeTypes: NodeType[] = ['INPUT', 'OUTPUT', 'NAND', 'NOT', 'AND', 'OR', 'XOR', 'XNOR', 'CONST', 'SPLIT', 'JOIN', 'DFF', 'COMPONENT'];
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(value)
   && !['__proto__', 'constructor', 'prototype'].includes(value);
 const validLabel = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 160;
-const validBits = (value: unknown): value is number => value === 1 || value === 2 || value === 4;
+const validBits = (value: unknown): value is number => value === 1 || value === 2 || value === 4 || value === 8;
 function record(value: unknown, error: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(error);
   return value as Record<string, unknown>;
@@ -112,13 +112,13 @@ function parseLibrary(raw: unknown): ComponentLibrary {
 export function parseWorkspace(text: string, options: { verifyProofs?: boolean } = {}): Workspace {
   if (text.length > 4_000_000) throw new Error('存档超过 4 MB 限制。');
   const raw = record(JSON.parse(text), '这不是兼容的逻辑工坊存档。');
-  if (raw.version !== 1 && raw.version !== 2) throw new Error('这不是兼容的逻辑工坊存档。');
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3) throw new Error('这不是兼容的逻辑工坊存档。');
   const circuits = record(raw.circuits, '存档缺少电路。');
   const proofs = raw.proofs === undefined ? {} : record(raw.proofs, '通关记录格式无效。');
   const inputs = raw.inputs === undefined ? {} : record(raw.inputs, '输入状态格式无效。');
   const workspace = createWorkspace();
   workspace.library = raw.version === 1 ? {} : parseLibrary(raw.library);
-  const maximumSavedLevel = raw.version === 1 ? 4 : levels.length;
+  const maximumSavedLevel = raw.version === 1 ? 4 : raw.version === 2 ? 20 : levels.length;
   const checkLevelKeys = (value: Record<string, unknown>) => {
     if (Object.keys(value).some(key => !/^[1-9][0-9]*$/.test(key) || Number(key) > maximumSavedLevel)) {
       throw new Error('存档包含无效关卡编号。');
@@ -167,5 +167,6 @@ export function loadWorkspace(): { workspace: Workspace; savedText?: string; err
 }
 
 export function saveWorkspace(workspace: Workspace) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
+  const { version, currentLevel, circuits, proofs, inputs, library } = workspace;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ version, currentLevel, circuits, proofs, inputs, library }));
 }

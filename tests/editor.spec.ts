@@ -53,10 +53,10 @@ test('builds every gate lesson through actual editor connections', async ({ page
     }
     await page.getByRole('button', { name: '测试电路', exact: true }).click();
     await expect(page.getByTestId('test-feedback')).toContainText('全部通过');
-    if (level === 4) await page.screenshot({ path: 'preview.png', fullPage: true });
+    if (level === 4) await page.screenshot({ path: 'work/first-four-preview.png', fullPage: true });
     if (level !== 4) await page.getByRole('button', { name: '下一关', exact: true }).click();
   }
-  await expect(page.getByTestId('progress-count')).toContainText('4 / 20');
+  await expect(page.getByTestId('progress-count')).toContainText('4 / 32');
 });
 
 test('undoes and restores connections, resets only current draft', async ({ page }) => {

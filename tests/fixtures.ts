@@ -1,5 +1,6 @@
 import type { Circuit, GateType } from '../src/contracts';
 import { getLevel } from '../src/levels';
+import { sequentialReferenceCircuit } from './sequential-fixtures';
 
 type Pin = { node: string; port: string };
 
@@ -65,6 +66,7 @@ class Builder {
 
 /** Test-only solutions composed from the tools available in each lesson. */
 export function referenceCircuit(levelId: number): Circuit {
+  if (levelId > 20) return sequentialReferenceCircuit(levelId);
   const b = new Builder(levelId);
   const a = b.input('A'), second = b.input('B'), s = b.input('S');
   switch (levelId) {

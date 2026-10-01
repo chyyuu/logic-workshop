@@ -1,4 +1,5 @@
-import type { GateType, Inputs, Outputs, Port } from './contracts';
+import type { GateType, Inputs, Outputs, Port, TestSequence } from './contracts';
+import { sequentialLevels } from './sequentialLevels';
 export type { GateType, Inputs } from './contracts';
 
 export interface Level {
@@ -17,9 +18,11 @@ export interface Level {
   rewardName?: string;
   expected: (inputs: Inputs) => number;
   expectedOutputs: (inputs: Inputs) => Outputs;
+  mode?: 'sequential';
+  sequences?: () => TestSequence[];
 }
 
-export const chapters = ['信号与逻辑门', '选择与分配', '多位信号', '组合运算'];
+export const chapters = ['信号与逻辑门', '选择与分配', '多位信号', '组合运算', '状态与时间'];
 type PortSpec = [string, number];
 const gateUnlocks: [GateType, number][] = [
   ['NAND', 2], ['NOT', 4], ['AND', 5], ['OR', 6], ['XOR', 7], ['XNOR', 8],
@@ -110,6 +113,7 @@ export const levels: Level[] = [
   lesson(20, '四位减法', '补码与借位', 'Diff 是 A−B 的四位结果；A 小于 B 时 Borrow 为 1。', 'Diff = (A − B) mod 16；Borrow = (A < B)', [['A', 4], ['B', 4]], [['Diff', 4], ['Borrow', 1]],
     i => ({ Diff: (i.A - i.B + 16) % 16, Borrow: i.A < i.B ? 1 : 0 }),
     ['减法可转为 A 加上 B 的反码再加 1。', '每一位反转 B，把初始进位设为 1。', '四位相加的 Sum 就是 Diff；最高位 Cout 反转后得到 Borrow。'], 'Subtract4'),
+  ...sequentialLevels,
 ];
 
 export function getLevel(id: number): Level {
@@ -119,7 +123,9 @@ export function getLevel(id: number): Level {
 }
 
 export function testInputs(id: number): Inputs[] {
-  const ports = getLevel(id).inputPorts;
+  const level = getLevel(id);
+  if (level.mode === 'sequential') return [];
+  const ports = level.inputPorts;
   const totalBits = ports.reduce((total, p) => total + p.bits, 0);
   return Array.from({ length: 2 ** totalBits }, (_, index) => {
     let shift = totalBits;
@@ -128,4 +134,8 @@ export function testInputs(id: number): Inputs[] {
       return [p.id, (index >> shift) & ((1 << p.bits) - 1)];
     }));
   });
+}
+
+export function testSequences(id: number): TestSequence[] {
+  return getLevel(id).sequences?.() ?? [];
 }

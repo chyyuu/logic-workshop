@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, useReactFlow, type Connection, type NodeChange, type EdgeChange } from '@xyflow/react';
 import { CircuitBoard, Check, ChevronRight, ArrowRight, Undo2, Redo2, Trash2, RotateCcw, Play, Pause, StepForward,
   ZoomIn, ZoomOut, Maximize, Download, Upload, LockKeyhole, Lightbulb, X, CircleCheck, CircleAlert,
-  Menu, SlidersHorizontal, Cable, Plus, BookOpen, MousePointer2, Copy, Package, UnfoldHorizontal, ChevronLeft } from 'lucide-react';
+  Menu, SlidersHorizontal, Cable, Plus, BookOpen, MousePointer2, Copy, Package, UnfoldHorizontal, ChevronLeft, Clock3 } from 'lucide-react';
 import { addGate, addComponent, getPorts, validateCircuit, connect, canConnect, createCircuit, removeSelection, type Circuit } from './model';
-import { levels, getLevel, testInputs, type GateType, type Inputs } from './levels';
+import { levels, getLevel, testInputs, testSequences, type GateType, type Inputs } from './levels';
 import type { TestResult, ComponentDefinition } from './contracts';
 import { encapsulateSelection, expandComponent, packageCircuit } from './components';
 import { backgroundTask, useSimulation } from './workerClient';
@@ -12,6 +12,7 @@ import { createId } from './id';
 import { loadWorkspace, saveWorkspace, type Workspace } from './storage';
 import { CircuitNodeView, GateSymbol, nodeDimensions, type FlowNode } from './CircuitNode';
 import { WireEdge, type FlowEdge } from './WireEdge';
+import { TimingWaveform } from './TimingWaveform';
 import '@xyflow/react/dist/style.css';
 import './styles.css';
 
@@ -32,6 +33,7 @@ function Workshop() {
   const current = workspace.currentLevel;
   const circuit = workspace.circuits[current];
   const level = getLevel(current);
+  const temporal = level.mode === 'sequential';
   const inputs = workspace.inputs[current];
   const [history, setHistory] = useState<Record<number, { past: Circuit[]; future: Circuit[] }>>({});
   const [result, setResult] = useState<TestResult | null>(null);
@@ -54,6 +56,8 @@ function Workshop() {
   const [failureOnly, setFailureOnly] = useState(false);
   const [busBits, setBusBits] = useState(4);
   const [fitEpoch, setFitEpoch] = useState(0);
+  const [observedStep, setObservedStep] = useState<{ scenarioId: string; stepIndex: number } | null>(null);
+  const [testView, setTestView] = useState<'cases' | 'waveform'>('cases');
   const taskAbort = useRef<AbortController | null>(null);
   const taskId = useRef(0);
   const workspaceRef = useRef(workspace); workspaceRef.current = workspace;
@@ -82,15 +86,26 @@ function Workshop() {
   const currentHistory = history[current] ?? { past: [], future: [] };
   const resultCurrent = result?.revision === circuit.revision;
   const hintCount = hints[current] ?? 0;
-  const samples = useMemo(() => testInputs(current), [current]);
-  const selectedSample = samples.findIndex(i => level.inputs.every(name => i[name] === inputs[name]));
+  const sequenceRows = useMemo(() => testSequences(current).flatMap(sequence => {
+    let cycle = 0;
+    return sequence.steps.map((step, stepIndex) => ({ ...step, scenarioId: sequence.id, scenarioLabel: sequence.label, stepIndex, cycle: cycle += Number(step.tick) }));
+  }), [current]);
+  const samples = useMemo(() => temporal ? sequenceRows.map(step => step.inputs) : testInputs(current), [current, temporal, sequenceRows]);
+  const selectedSample = temporal
+    ? sequenceRows.findIndex(row => row.scenarioId === observedStep?.scenarioId && row.stepIndex === observedStep?.stepIndex)
+    : samples.findIndex(i => level.inputs.every(name => i[name] === inputs[name]));
 
-  const simulation = useSimulation(circuit, inputs, workspace.library);
+  const simulation = useSimulation(circuit, inputs, workspace.library, fitEpoch);
   const rowsToShow = samples.map((sample, index) => ({ sample, index })).filter(({ index }) => !failureOnly || (resultCurrent && result?.rows[index] && !result.rows[index].passed));
   const pages = Math.max(1, Math.ceil(rowsToShow.length / 8));
   const shownPage = Math.min(page, pages - 1);
   const visibleRows = rowsToShow.slice(shownPage * 8, shownPage * 8 + 8);
   useEffect(() => { if (!failureOnly) setPage(Math.max(0, Math.floor(selectedSample / 8))); }, [selectedSample, failureOnly]);
+  useEffect(() => {
+    setObservedStep(null); setTestView('cases');
+    setBusBits(getLevel(current).mode === 'sequential' ? Math.max(...getLevel(current).inputPorts.map(p => p.bits)) : 4);
+  }, [current]);
+  useEffect(() => { setObservedStep(null); }, [circuit.revision, fitEpoch]);
 
   const notify = useCallback((message: string) => setToast(message), []);
   const cancelTask = useCallback(() => { ++taskId.current; taskAbort.current?.abort(); taskAbort.current = null; setBusy(''); setVerifyingInitial(false); }, []);
@@ -132,11 +147,28 @@ function Workshop() {
   }, [circuit, current, cancelTask, verifyingInitial]);
 
   const applyInputs = useCallback((next: Inputs) => {
+    setObservedStep(null);
     setWorkspace(w => ({ ...w, inputs: { ...w.inputs, [current]: next } }));
   }, [current]);
 
-  const step = useCallback(() => applyInputs(samples[(selectedSample + 1) % samples.length]), [samples, selectedSample, applyInputs]);
-  useEffect(() => { if (!playing) return; const timer = setInterval(step, 900); return () => clearInterval(timer); }, [playing, step]);
+  const observeSample = useCallback((index: number) => {
+    setPlaying(false); applyInputs(samples[index]);
+    if (temporal) {
+      const row = sequenceRows[index];
+      simulation.replay(row.scenarioId, row.stepIndex);
+      setObservedStep({ scenarioId: row.scenarioId, stepIndex: row.stepIndex });
+    }
+  }, [samples, sequenceRows, temporal, applyInputs, simulation.replay]);
+  const step = useCallback(() => {
+    if (temporal) { setObservedStep(null); simulation.tick(); }
+    else applyInputs(samples[(selectedSample + 1) % samples.length]);
+  }, [temporal, samples, selectedSample, applyInputs, simulation.tick]);
+  useEffect(() => {
+    if (!playing) return;
+    const timer = setInterval(() => { if (!simulation.pending && !busy) step(); }, 900);
+    return () => clearInterval(timer);
+  }, [playing, step, simulation.pending, busy]);
+  useEffect(() => { if (simulation.error) setPlaying(false); }, [simulation.error]);
 
   const changeLevel = (id: number) => {
     if (id > unlocked || busy === '验证通关记录') return;
@@ -161,8 +193,9 @@ function Workshop() {
   };
 
   const add = (type: GateType, position?: { x: number; y: number }) => {
-    const desired = position ?? vacantPosition(130, ['SPLIT', 'JOIN'].includes(type) ? Math.max(106, 46 + busBits * 25) : 106);
-    try { commit(addGate(circuit, type, desired, undefined, workspace.library, ['SPLIT', 'JOIN', 'CONST'].includes(type) ? busBits : 1)); }
+    const bits = temporal || ['SPLIT', 'JOIN', 'CONST'].includes(type) ? busBits : 1;
+    const desired = position ?? vacantPosition(type === 'DFF' ? 180 : 130, ['SPLIT', 'JOIN'].includes(type) ? Math.max(106, 46 + bits * 25) : 106);
+    try { commit(addGate(circuit, type, desired, undefined, workspace.library, bits)); }
     catch (error) { notify((error as Error).message); }
   };
 
@@ -243,7 +276,11 @@ function Workshop() {
       const judged = await backgroundTask<TestResult>('judge', { circuit: clone(circuit), library: workspace.library }, controller.signal);
       if (id !== taskId.current || workspaceRef.current.currentLevel !== current || workspaceRef.current.circuits[current].revision !== circuit.revision) return;
       setResult(judged); setBusy(''); setFailureOnly(false);
-      if (judged.failure) { applyInputs(judged.failure.inputs); setPage(Math.floor(samples.findIndex(i => level.inputs.every(name => i[name] === judged.failure!.inputs[name])) / 8)); }
+      if (judged.failure) {
+        const index = temporal ? sequenceRows.findIndex(row => row.scenarioId === judged.failure!.scenarioId && row.stepIndex === judged.failure!.stepIndex)
+          : samples.findIndex(i => level.inputs.every(name => i[name] === judged.failure!.inputs[name]));
+        if (index >= 0) { observeSample(index); setPage(Math.floor(index / 8)); }
+      }
       if (judged.passed) {
         setWorkspace(w => ({ ...w, proofs: { ...w.proofs, [current]: clone(circuit) } }));
       }
@@ -301,7 +338,8 @@ function Workshop() {
     if (importInput.current) importInput.current.value = '';
   };
 
-  const showFailure = !!(resultCurrent && result?.failure && level.inputs.every(name => result.failure!.inputs[name] === inputs[name]));
+  const showFailure = !!(resultCurrent && result?.failure && level.inputs.every(name => result.failure!.inputs[name] === inputs[name])
+    && (!temporal || (!simulation.pending && observedStep?.scenarioId === result.failure.scenarioId && observedStep?.stepIndex === result.failure.stepIndex && simulation.state?.cycle === result.failure.cycle)));
   // Retain dimensions on controlled updates so React Flow keeps visibility and handle bounds.
   const flowNodes: FlowNode[] = circuit.nodes.map(node => ({ id: node.id, type: 'circuit', position: node.position,
     measured: nodeDimensions(node.type, getPorts(node, workspace.library)),
@@ -349,7 +387,7 @@ function Workshop() {
   const selectedWire = circuit.wires.find(w => selection.wires.includes(w.id));
   const hasEditableSelection = circuit.nodes.some(n => selection.nodes.includes(n.id) && n.type !== 'INPUT' && n.type !== 'OUTPUT');
 
-  return <div className="workshop">
+  return <div className={`workshop ${temporal ? 'temporal-workshop' : ''}`}>
     <aside className={`sidebar ${chapterOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><span className="brand-mark"><CircuitBoard size={23} /></span><div><strong>逻辑工坊</strong><span>LOGIC WORKSHOP</span></div>
         <button className="close-sidebar tool-button" aria-label="关闭关卡目录" onClick={() => setChapterOpen(false)}><X size={18} /></button></div>
@@ -371,15 +409,15 @@ function Workshop() {
         {!Object.keys(workspace.library).length && <p className="library-empty">组件库为空</p>}
       </section>}
       <div className="components-section"><div className="sidebar-section-title"><Cable size={14} /><span>可用组件</span><span className="component-count">{level.allowed.length}</span></div>
-        {level.allowed.includes('SPLIT') && <label className="bus-size">总线位宽<select aria-label="总线位宽" value={busBits} onChange={e => setBusBits(Number(e.target.value))}>{level.allowed.includes('CONST') && <option value="1">1 bit</option>}<option value="2">2 bit</option><option value="4">4 bit</option></select></label>}
+        {level.allowed.includes('SPLIT') && <label className="bus-size">元件位宽<select aria-label="总线位宽" value={busBits} onChange={e => setBusBits(Number(e.target.value))}>{level.allowed.includes('CONST') && <option value="1">1 bit</option>}<option value="2">2 bit</option><option value="4">4 bit</option>{temporal && <option value="8">8 bit</option>}</select></label>}
         {level.allowed.length === 0 ? <div className="wire-component"><Cable size={26} /><div><strong>导线</strong><span>1 bit</span></div></div> : level.allowed.map(type =>
           <button className="component" key={type} aria-label={`添加 ${type}`} draggable onDragStart={e => { e.dataTransfer.setData('application/logic-gate', type); e.dataTransfer.effectAllowed = 'copy'; }} onClick={() => add(type)}>
-            <GateSymbol type={type} small /><span><strong>{type}</strong><small>{({ NAND: '与非门', NOT: '非门', AND: '与门', OR: '或门', XOR: '异或门', XNOR: '同或门', SPLIT: '拆分总线', JOIN: '合并总线', CONST: '常量' })[type]} · {['SPLIT', 'JOIN', 'CONST'].includes(type) ? busBits : 1} bit</small></span><Plus size={15} />
+            <GateSymbol type={type} small /><span><strong>{type}</strong><small>{({ NAND: '与非门', NOT: '非门', AND: '与门', OR: '或门', XOR: '异或门', XNOR: '同或门', SPLIT: '拆分总线', JOIN: '合并总线', CONST: '常量', DFF: 'D 触发器' })[type]} · {temporal || ['SPLIT', 'JOIN', 'CONST'].includes(type) ? busBits : 1} bit</small></span><Plus size={15} />
           </button>)}
       </div>
       </div>
       <div className="sidebar-progress"><div><span>总进度</span><strong data-testid="progress-count">{done} / {levels.length}</strong></div><div className="progress-track"><i style={{ width: `${done / levels.length * 100}%` }} /></div></div>
-      <div className="sidebar-footer"><span className="footer-dot" /><span>从信号到运算</span><span className="version">v0.2</span></div>
+      <div className="sidebar-footer"><span className="footer-dot" /><span>从信号到状态</span><span className="version">v0.3</span></div>
     </aside>
 
     <main className="main-workspace">
@@ -398,8 +436,10 @@ function Workshop() {
           <ToolButton label="删除所选" onClick={deleteSelected} disabled={!selection.wires.length && !hasEditableSelection}><Trash2 size={16} /></ToolButton>
           <ToolButton label="封装所选组件" onClick={() => openPackage('selection')} disabled={!hasEditableSelection}><Package size={16} /></ToolButton>
           <ToolButton label="重置当前电路" onClick={() => setResetOpen(true)}><RotateCcw size={16} /></ToolButton>
-        </div><div className="run-tools"><ToolButton label={playing ? '暂停用例' : '播放用例'} active={playing} onClick={() => setPlaying(p => !p)}>{playing ? <Pause size={17} /> : <Play size={17} />}</ToolButton>
-          <ToolButton label="下一组输入" onClick={() => { setPlaying(false); step(); }}><StepForward size={18} /></ToolButton>
+        </div><div className="run-tools">{temporal && <span className="clock-count" data-testid="clock-cycle"><Clock3 size={14} />周期 {simulation.state?.cycle ?? 0}</span>}
+          <ToolButton label={temporal ? playing ? '暂停时钟' : '运行时钟' : playing ? '暂停用例' : '播放用例'} active={playing} disabled={!!busy} onClick={() => setPlaying(p => !p)}>{playing ? <Pause size={17} /> : <Play size={17} />}</ToolButton>
+          <ToolButton label={temporal ? '单步周期' : '下一组输入'} disabled={temporal && (simulation.pending || !!busy)} onClick={() => { setPlaying(false); step(); }}><StepForward size={18} /></ToolButton>
+          {temporal && <ToolButton label="清零状态" disabled={simulation.pending || !!busy} onClick={() => { setPlaying(false); setObservedStep(null); simulation.reset(); }}><RotateCcw size={16} /></ToolButton>}
           {busy ? <button className="test-button" aria-label="取消后台任务" onClick={cancelTask}><X size={16} /><span>{busy}</span></button> : <button className="test-button" aria-label="测试电路" onClick={() => void runTest()}><CircleCheck size={16} /><span>测试电路</span></button>}
           <button className="task-toggle tool-button" aria-label="查看任务" title="查看任务" onClick={() => setTaskOpen(true)}><SlidersHorizontal size={18} /></button>
         </div>
@@ -440,20 +480,25 @@ function Workshop() {
           </div>
 
           <section className="test-panel" aria-label="测试用例">
-            <div className="test-panel-heading"><div><span className="panel-label">真值表</span><span className="muted">{samples.length} 组输入</span></div><div className="sample-indicator"><span className={playing ? 'playing-dot' : ''} />{playing ? '播放中' : '当前输入'}<strong>{String(selectedSample + 1).padStart(2, '0')}</strong><span>/ {String(samples.length).padStart(2, '0')}</span></div></div>
-            <div className="test-table-wrap"><table><thead><tr><th className="row-number">用例</th>{level.inputs.map(name => <th key={name}>{name}</th>)}{level.outputPorts.map(p => <th key={p.id}>期望 {p.label}</th>)}{level.outputPorts.map(p => <th key={p.id}>实际 {p.label}</th>)}<th>结果</th></tr></thead>
+            <div className="test-panel-heading"><div><span className="panel-label">{temporal ? '时序测试' : '真值表'}</span><span className="muted">{samples.length} {temporal ? '步观察' : '组输入'}</span></div>{temporal
+              ? <div className="timing-tabs"><button className={testView === 'cases' ? 'chosen' : ''} onClick={() => setTestView('cases')}>测试序列</button><button className={testView === 'waveform' ? 'chosen' : ''} onClick={() => setTestView('waveform')}>波形记录</button></div>
+              : <div className="sample-indicator"><span className={playing ? 'playing-dot' : ''} />{playing ? '播放中' : '当前输入'}<strong>{String(selectedSample + 1).padStart(2, '0')}</strong><span>/ {String(samples.length).padStart(2, '0')}</span></div>}</div>
+            {temporal && testView === 'waveform' ? <TimingWaveform frames={simulation.trace ?? []} inputs={level.inputPorts} outputs={level.outputPorts} />
+              : <div className="test-table-wrap"><table><thead><tr><th className="row-number">用例</th>{temporal && <><th>场景</th><th>沿 / 周期</th></>}{level.inputs.map(name => <th key={name}>{name}</th>)}{level.outputPorts.map(p => <th key={p.id}>期望 {p.label}</th>)}{level.outputPorts.map(p => <th key={p.id}>实际 {p.label}</th>)}<th>结果</th></tr></thead>
               <tbody>{visibleRows.map(({ sample, index }) => {
                 const row = resultCurrent ? result?.rows[index] : undefined;
-                const expected = level.expectedOutputs(sample);
-                return <tr key={index} className={`${index === selectedSample ? 'active-row' : ''} ${row && !row.passed ? 'failed-row' : ''}`} onClick={() => { setPlaying(false); applyInputs(sample); }}>
-                  <td><button aria-label={`观察用例 ${index + 1}`} onClick={event => { event.stopPropagation(); setPlaying(false); applyInputs(sample); }}><span className="row-cursor">{index === selectedSample ? <ChevronRight size={12} /> : null}</span>{String(index + 1).padStart(2, '0')}</button></td>
+                const timing = sequenceRows[index];
+                const expected = temporal ? timing.expectedOutputs : level.expectedOutputs(sample);
+                return <tr key={index} className={`${index === selectedSample ? 'active-row' : ''} ${row && !row.passed ? 'failed-row' : ''}`} onClick={() => observeSample(index)}>
+                  <td><button aria-label={`观察用例 ${index + 1}`} onClick={event => { event.stopPropagation(); observeSample(index); }}><span className="row-cursor">{index === selectedSample ? <ChevronRight size={12} /> : null}</span>{String(index + 1).padStart(2, '0')}</button></td>
+                  {temporal && <><td className="scenario-label" title={timing.scenarioLabel}>{timing.scenarioLabel} · {timing.stepIndex + 1}</td><td>{timing.tick ? '↑' : '·'} {timing.cycle}</td></>}
                   {level.inputs.map(name => <td key={name}>{sample[name]}</td>)}{level.outputPorts.map(p => <td key={`expected-${p.id}`}>{expected[p.id]}</td>)}
                   {level.outputPorts.map(p => { const actual = row?.actualOutputs[p.id] ?? (index === selectedSample ? simulation.values[p.id] ?? 'X' : '-'); return <td key={`actual-${p.id}`} className={typeof actual === 'string' && actual.includes('X') ? 'unknown-cell' : ''}>{actual}</td>; })}
                   <td>{row ? <span className={`table-status ${row.passed ? 'pass' : 'fail'}`}>{row.passed ? <Check size={12} /> : <X size={12} />}{row.passed ? '通过' : '不一致'}</span> : <span className="untested">待测试</span>}</td>
                 </tr>;
-              })}</tbody></table></div>
+              })}</tbody></table></div>}
             <div className="test-panel-footer"><span>{resultCurrent && result ? `${result.rows.filter(r => r.passed).length} / ${samples.length} 通过` : '尚未验证'}{simulation.pending && ' · 信号计算中'}</span>
-              {samples.length > 8 && <div className="pagination"><label><input type="checkbox" checked={failureOnly} disabled={!resultCurrent} onChange={e => { setFailureOnly(e.target.checked); setPage(0); }} />仅失败</label><ToolButton label="上一页用例" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={!shownPage}><ChevronLeft size={14} /></ToolButton><span>{shownPage + 1} / {pages}</span><ToolButton label="下一页用例" onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={shownPage === pages - 1}><ChevronRight size={14} /></ToolButton></div>}
+              {samples.length > 8 && (!temporal || testView === 'cases') && <div className="pagination"><label><input type="checkbox" checked={failureOnly} disabled={!resultCurrent} onChange={e => { setFailureOnly(e.target.checked); setPage(0); }} />仅失败</label><ToolButton label="上一页用例" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={!shownPage}><ChevronLeft size={14} /></ToolButton><span>{shownPage + 1} / {pages}</span><ToolButton label="下一页用例" onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={shownPage === pages - 1}><ChevronRight size={14} /></ToolButton></div>}
             </div>
           </section>
         </section>
@@ -465,20 +510,25 @@ function Workshop() {
             {panel === 'task' ? <><div className="task-eyebrow">关卡 {String(current).padStart(2, '0')}<span>{workspace.proofs[current] ? '已完成' : '进行中'}</span></div>
               <h1>{level.title}</h1><p className="task-story">{level.story}</p>
               <div className="goal-section"><h3>目标</h3><p>{level.goal}</p><div className="formula">{level.formula}</div></div>
+              {temporal && <div className="timing-help"><Clock3 size={15} /><p>改变输入不会推进时钟。单步周期让全部 DFF 同时采样旧值，再更新输出。清零状态只重启试验；复位输入 R 需要在时钟沿生效。</p></div>}
               <div className="interface-section"><h3>接口</h3>{level.inputPorts.map(p => <div key={p.id}><span>输入</span><strong>{p.label}</strong><small>{p.bits} bit</small></div>)}{level.outputPorts.map(p => <div key={p.id}><span>输出</span><strong>{p.label}</strong><small>{p.bits} bit</small></div>)}</div>
               <div className="hint-section"><div><h3>思路提示</h3><span>{hintCount} / 3</span></div>
                 {level.hints.slice(0, hintCount).map((hint, index) => <p key={hint}><span>0{index + 1}</span>{hint}</p>)}
                 <button className="hint-button" disabled={hintCount === 3} onClick={() => setHints(h => ({ ...h, [current]: Math.min(3, (h[current] ?? 0) + 1) }))}><Lightbulb size={15} />{hintCount === 3 ? '提示已全部展开' : hintCount ? '下一条提示' : '展开提示'}<ChevronRight size={14} /></button>
               </div>
               <div className={`test-feedback ${resultCurrent && result?.passed ? 'passed' : resultCurrent && result ? 'not-passed' : ''}`} data-testid="test-feedback" aria-live="polite">
-                {resultCurrent && result ? result.passed ? <><CircleCheck size={23} /><strong>{samples.length} / {samples.length} 全部通过</strong><p>{current === levels.length ? '全部关卡完成。' : '电路正确，下一关已解锁。'}</p>
+                {resultCurrent && result ? result.passed ? <><CircleCheck size={23} /><strong>{samples.length} / {samples.length} 全部通过</strong><p>{current === levels.length ? '状态与时间阶段完成。可以导出作品，测试这一阶段的效果。' : '电路正确，下一关已解锁。'}</p>
                   <button className="secondary-button save-component-button" onClick={() => openPackage('whole')}><Package size={14} />保存为组件</button>
                   {current < levels.length ? <button className="next-button" aria-label="下一关" onClick={() => changeLevel(current + 1)}>下一关<ArrowRight size={16} /></button>
                     : <button className="next-button" onClick={exportSave}>导出我的作品<Download size={15} /></button>}</>
-                  : <><CircleAlert size={22} /><strong>{result.error ? '检查电路连接' : '发现不一致'}</strong>{result.failure && <><p className="failure-inputs">{Object.entries(result.failure.inputs).map(([name, v]) => `${name} = ${v}`).join('，')}</p>
+                  : <><CircleAlert size={22} /><strong>{result.error ? '检查电路连接' : '发现不一致'}</strong>{result.failure && <>{temporal && <p className="failure-scenario">{result.failure.scenarioLabel} · 第 {(result.failure.stepIndex ?? 0) + 1} 步 · 周期 {result.failure.cycle}</p>}<p className="failure-inputs">{Object.entries(result.failure.inputs).map(([name, v]) => `${name} = ${v}`).join('，')}</p>
                     {level.outputPorts.filter(p => result.failure!.mismatches.includes(p.id)).map(p => <div key={p.id} className="failure-values"><span>{level.outputPorts.length > 1 ? `${p.label} ` : ''}期望 <b>{result.failure!.expectedOutputs[p.id]}</b></span><span>实际 <b>{result.failure!.actualOutputs[p.id]}</b></span></div>)}
-                    <p>已定位到输出 {result.failure.mismatches.join('、')}。</p><button className="secondary-button" onClick={() => { applyInputs(result.failure!.inputs); setFailureOnly(false); }}>回放反例</button></>}{result.error && <p>{result.error}</p>}</>
-                  : <><CircuitBoard size={23} /><strong>{result && !resultCurrent ? '电路已修改' : '等待验证'}</strong><p>{result && !resultCurrent ? '重新测试当前电路。' : '完成连接后，测试所有输入组合。'}</p></>}
+                    <p>已定位到输出 {result.failure.mismatches.join('、')}。{temporal && '回放会重建失败前的完整状态。'}</p><button className="secondary-button" onClick={() => {
+                      const index = temporal ? sequenceRows.findIndex(row => row.scenarioId === result.failure!.scenarioId && row.stepIndex === result.failure!.stepIndex)
+                        : samples.findIndex(i => level.inputs.every(name => i[name] === result.failure!.inputs[name]));
+                      if (index >= 0) observeSample(index); setFailureOnly(false);
+                    }}>回放反例</button></>}{result.error && <p>{result.error}</p>}</>
+                  : <><CircuitBoard size={23} /><strong>{result && !resultCurrent ? '电路已修改' : '等待验证'}</strong><p>{result && !resultCurrent ? '重新测试当前电路。' : temporal ? '完成连接后，测试连续输入、保持、复位与时钟沿。' : '完成连接后，测试所有输入组合。'}</p></>}
               </div>
             </> : <div className="properties-section"><h3>所选对象</h3>{selectedNode ? <><h1>{selectedNode.label}</h1><dl><dt>类型</dt><dd>{selectedNode.type}</dd><dt>位宽</dt><dd>{selectedNode.type === 'COMPONENT' ? `${getPorts(selectedNode, workspace.library).inputs.map(p => p.bits).join(',')} → ${getPorts(selectedNode, workspace.library).outputs.map(p => p.bits).join(',')}` : selectedNode.bits ?? 1} bit</dd><dt>当前信号</dt><dd>{selectedNode.type === 'INPUT' ? inputs[selectedNode.id] : simulation.values[selectedNode.id] ?? 'X'}</dd><dt>位置</dt><dd>{Math.round(selectedNode.position.x)}, {Math.round(selectedNode.position.y)}</dd></dl>
                 {selectedNode.type === 'CONST' && <label className="property-input">常量值<input aria-label="常量值" type="number" min="0" max={2 ** (selectedNode.bits ?? 1) - 1} value={selectedNode.value ?? 0} onChange={e => { const value = Math.max(0, Math.min(2 ** (selectedNode.bits ?? 1) - 1, Math.trunc(Number(e.target.value)))); commit({ ...circuit, revision: circuit.revision + 1, nodes: circuit.nodes.map(n => n.id === selectedNode.id ? { ...n, value } : n) }); }} /></label>}
@@ -487,7 +537,7 @@ function Workshop() {
                 : selectedWire ? <><h1>导线</h1><dl><dt>来源</dt><dd>{circuit.nodes.find(n => n.id === selectedWire.source)?.label}.{selectedWire.sourceHandle}</dd><dt>目标</dt><dd>{circuit.nodes.find(n => n.id === selectedWire.target)?.label}.{selectedWire.targetHandle}</dd><dt>信号</dt><dd>{simulation.wires[selectedWire.id]}</dd></dl><button className="secondary-button" onClick={deleteSelected}><Trash2 size={14} />删除导线</button></>
                 : <div className="empty-selection"><MousePointer2 size={26} /><p>未选择对象</p></div>}</div>}
           </div>
-          <div className="task-footer"><span>数字逻辑</span><span>组合电路</span></div>
+          <div className="task-footer"><span>数字逻辑</span><span>{temporal ? '时序电路 · 统一时钟' : '组合电路'}</span></div>
         </aside>
       </div>
     </main>

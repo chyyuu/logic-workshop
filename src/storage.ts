@@ -1,11 +1,13 @@
 import { createCircuit, validateCircuit, validateLibrary } from './model';
 import { levels } from './levels';
 import { judge } from './simulator';
+import { assemble } from './assembler';
+import { programmingMachine, programmingMachineLibrary } from './programmingMachine';
 import type { Circuit, CircuitGraph, CircuitNode, ComponentDefinition, ComponentLibrary, Inputs, NodeType, Port, Wire } from './contracts';
 
 export const STORAGE_KEY = 'logic-workshop.v1';
 export interface Workspace {
-  version: 4;
+  version: 5;
   currentLevel: number;
   circuits: Record<number, Circuit>;
   proofs: Record<number, Circuit>;
@@ -14,9 +16,9 @@ export interface Workspace {
 }
 
 export function createWorkspace(): Workspace {
-  return { version: 4, currentLevel: 1, proofs: {}, library: {},
-    circuits: Object.fromEntries(levels.map(level => [level.id, createCircuit(level.id)])),
-    inputs: Object.fromEntries(levels.map(level => [level.id, Object.fromEntries(level.inputs.map(name => [name, 0]))])) };
+  return { version: 5, currentLevel: 1, proofs: {}, library: programmingMachineLibrary(),
+    circuits: Object.fromEntries(levels.map(level => [level.id, level.id >= 45 ? programmingMachine(level.id) : createCircuit(level.id)])),
+    inputs: Object.fromEntries(levels.map(level => [level.id, Object.fromEntries(level.inputs.map(name => [name, level.id >= 45 && name === 'E' ? 1 : 0]))])) };
 }
 
 const nodeTypes: NodeType[] = ['INPUT', 'OUTPUT', 'NAND', 'NOT', 'AND', 'OR', 'XOR', 'XNOR', 'CONST', 'SPLIT', 'JOIN', 'DFF', 'ROM', 'RAM', 'COMPONENT'];
@@ -54,12 +56,24 @@ function parseGraph(raw: unknown): CircuitGraph {
         throw new Error('ROM 程序必须包含至多 256 个十六位整数。');
       }
     }
+    if (node.programSource !== undefined) {
+      if (node.type !== 'ROM') throw new Error('只有 ROM 节点可以保存汇编源代码。');
+      if (typeof node.programSource !== 'string' || node.programSource.length > 32_000) {
+        throw new Error('汇编源代码必须为至多 32,000 字符的文本。');
+      }
+      const words = assemble(node.programSource).words;
+      if (!Array.isArray(node.words) || words.length !== node.words.length
+        || words.some((word, index) => word !== (node.words as number[])[index])) {
+        throw new Error('汇编源代码与 ROM 程序字不一致。');
+      }
+    }
     if (node.value !== undefined && (typeof node.value !== 'number' || !Number.isInteger(node.value) || node.value < 0 || node.value >= 2 ** bits)) {
       throw new Error('常量数值无效。');
     }
     return { id: node.id, type: node.type as NodeType, label: node.label, position: { x: position.x, y: position.y },
       ...(node.bits === undefined ? {} : { bits }), ...(node.value === undefined ? {} : { value: node.value as number }),
       ...(node.type === 'ROM' && node.words !== undefined ? { words: [...node.words as number[]] } : {}),
+      ...(node.type === 'ROM' && node.programSource !== undefined ? { programSource: node.programSource as string } : {}),
       ...(node.type === 'COMPONENT' ? { componentKey: node.componentKey as string } : {}) };
   });
   const wires: Wire[] = graph.wires.map(value => {
@@ -123,13 +137,16 @@ function parseLibrary(raw: unknown): ComponentLibrary {
 export function parseWorkspace(text: string, options: { verifyProofs?: boolean } = {}): Workspace {
   if (text.length > 4_000_000) throw new Error('存档超过 4 MB 限制。');
   const raw = record(JSON.parse(text), '这不是兼容的逻辑工坊存档。');
-  if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4) throw new Error('这不是兼容的逻辑工坊存档。');
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4 && raw.version !== 5) throw new Error('这不是兼容的逻辑工坊存档。');
   const circuits = record(raw.circuits, '存档缺少电路。');
   const proofs = raw.proofs === undefined ? {} : record(raw.proofs, '通关记录格式无效。');
   const inputs = raw.inputs === undefined ? {} : record(raw.inputs, '输入状态格式无效。');
   const workspace = createWorkspace();
-  workspace.library = raw.version === 1 ? {} : parseLibrary(raw.library);
-  const maximumSavedLevel = raw.version === 1 ? 4 : raw.version === 2 ? 20 : raw.version === 3 ? 32 : levels.length;
+  const savedLibrary = raw.version === 1 ? {} : record(raw.library, '组件库格式无效。');
+  // New fixed drafts require canonical CPU dependencies. Preserve every saved version,
+  // including same-key definitions; fixed-machine validation diagnoses conflicts.
+  workspace.library = parseLibrary(raw.version === 5 ? savedLibrary : { ...programmingMachineLibrary(), ...savedLibrary });
+  const maximumSavedLevel = raw.version === 1 ? 4 : raw.version === 2 ? 20 : raw.version === 3 ? 32 : raw.version === 4 ? 44 : 56;
   const checkLevelKeys = (value: Record<string, unknown>) => {
     if (Object.keys(value).some(key => !/^[1-9][0-9]*$/.test(key) || Number(key) > maximumSavedLevel)) {
       throw new Error('存档包含无效关卡编号。');
@@ -138,6 +155,10 @@ export function parseWorkspace(text: string, options: { verifyProofs?: boolean }
   checkLevelKeys(circuits); checkLevelKeys(proofs); checkLevelKeys(inputs);
   for (const level of levels) {
     if (level.id <= maximumSavedLevel) workspace.circuits[level.id] = parseCircuit(circuits[level.id], level.id, workspace.library);
+    else if (level.id >= 45) {
+      const errors = validateCircuit(workspace.circuits[level.id], workspace.library);
+      if (errors.length) throw new Error(errors[0]);
+    }
     if (proofs[level.id] !== undefined) workspace.proofs[level.id] = parseCircuit(proofs[level.id], level.id, workspace.library);
     if (inputs[level.id] !== undefined) {
       const values = record(inputs[level.id], '输入状态格式无效。');
@@ -179,11 +200,12 @@ export function loadWorkspace(): { workspace: Workspace; savedText?: string; err
 
 export function saveWorkspace(workspace: Workspace) {
   const graph = (value: CircuitGraph): CircuitGraph => ({
-    nodes: value.nodes.map(({ id, type, label, position, bits, value: constant, componentKey, words }) => ({
+    nodes: value.nodes.map(({ id, type, label, position, bits, value: constant, componentKey, words, programSource }) => ({
       id, type, label, position: { x: position.x, y: position.y },
       ...(bits === undefined ? {} : { bits }), ...(constant === undefined ? {} : { value: constant }),
       ...(type === 'COMPONENT' ? { componentKey } : {}),
       ...(type === 'ROM' && words !== undefined ? { words: [...words] } : {}),
+      ...(type === 'ROM' && programSource !== undefined ? { programSource } : {}),
     })),
     wires: value.wires.map(({ id, source, target, sourceHandle, targetHandle }) => ({ id, source, target, sourceHandle, targetHandle })),
   });

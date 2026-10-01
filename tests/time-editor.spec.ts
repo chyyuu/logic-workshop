@@ -5,11 +5,12 @@ import { addComponent, connect as connectCircuit, createCircuit } from '../src/m
 import { getLevel, levels, testSequences } from '../src/levels';
 import { encapsulateSelection, packageCircuit } from '../src/components';
 import { referenceCircuit } from './fixtures';
+import { architectureLibrary } from '../src/architectureCircuits';
 
 test.setTimeout(120_000);
 const errors = new WeakMap<Page, string[]>();
 function stateAt(id: number): Workspace {
-  const state: Workspace = { version: 4, currentLevel: id, library: {}, proofs: {},
+  const state: Workspace = { version: 5, currentLevel: id, library: architectureLibrary(), proofs: {},
     circuits: Object.fromEntries(levels.map(level => [level.id, createCircuit(level.id)])),
     inputs: Object.fromEntries(levels.map(level => [level.id, Object.fromEntries(level.inputs.map(name => [name, 0]))])) };
   for (let level = 1; level <= 32; level++) {
@@ -78,7 +79,7 @@ test('builds a DFF in the editor; inputs hold, ticks capture, movement preserves
   await bit(page, 'D', true); await tick(page, 3); await expect(page.getByTestId('output-Q')).toHaveText('1');
   const exported = await exportState(page); await importState(page, exported);
   await expect(page.getByTestId('clock-cycle')).toContainText('周期 0'); await expect(page.getByTestId('output-Q')).toHaveText('0');
-  expect(exported.version).toBe(4);
+  expect(exported.version).toBe(5);
   await page.screenshot({ path: 'work/time-register-desktop.png' });
 });
 
@@ -167,7 +168,7 @@ test('nested stateful components keep their dependencies on export/import and wo
   const state = stateAt(23);
   const first = encapsulateSelection(state.circuits[23], state.circuits[23].nodes.filter(node => !['INPUT', 'OUTPUT'].includes(node.type)).map(node => node.id), '使能存储', state.library);
   const second = encapsulateSelection(first.circuit, first.circuit.nodes.filter(node => node.type === 'COMPONENT').map(node => node.id), '嵌套存储', first.library);
-  state.circuits[23] = second.circuit; state.library = second.library;
+  state.circuits[23] = second.circuit; state.library = { ...state.library, ...second.library };
   await importState(page, state); await bit(page, 'D', true); await bit(page, 'E', true); await tick(page, 1);
   await expect(page.getByTestId('output-Q')).toHaveText('1');
   await page.getByRole('button', { name: '测试电路', exact: true }).click(); await expect(page.getByTestId('test-feedback')).toContainText('全部通过');
@@ -181,7 +182,7 @@ test('nested stateful components keep their dependencies on export/import and wo
 
 test('a registered component with external self-feedback expands and undo restores every connection', async ({ page }) => {
   const state = stateAt(21), packaged = packageCircuit(referenceCircuit(21), '保存自身', {});
-  state.library = packaged.library;
+  state.library = { ...state.library, ...packaged.library };
   let circuit = addComponent(createCircuit(21), packaged.key, { x: 330, y: 190 }, state.library, 'unit');
   circuit = connectCircuit(circuit, 'unit', 'Q', 'unit', 'D', state.library);
   state.circuits[21] = connectCircuit(circuit, 'unit', 'Q', 'Q', 'in', state.library);

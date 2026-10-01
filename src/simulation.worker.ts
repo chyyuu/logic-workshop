@@ -1,11 +1,14 @@
-import { judge, replaySequence, simulate } from './simulator';
+import { createSimulationSession, judge, replaySequence, simulate } from './simulator';
 import { levels, testSequences } from './levels';
 import { parseWorkspace } from './storage';
+import { isProgrammingLevel, programmingSessionKey } from './programmingMachine';
+import { createProgrammingRunner } from './programmingRunner';
+import { programmingCases } from './programmingSpec';
 import type { Circuit, ComponentLibrary, Inputs, RuntimeState, Simulation, SimulationFrame } from './contracts';
 
 interface Request {
   id: number;
-  operation: 'simulate' | 'judge' | 'verify' | 'load' | 'tick' | 'reset' | 'replay';
+  operation: 'simulate' | 'judge' | 'verify' | 'load' | 'tick' | 'reset' | 'replay' | 'programStep' | 'programRun' | 'programCase';
   circuit?: Circuit;
   inputs?: Inputs;
   library?: ComponentLibrary;
@@ -14,12 +17,19 @@ interface Request {
   sessionKey?: string;
   scenarioId?: string;
   stepIndex?: number;
+  instruction?: boolean;
+  breakpoints?: number[];
+  maxCycles?: number;
+  caseId?: string;
 }
 
 let sessionKey: string | undefined;
 let runtime: RuntimeState | undefined;
 let trace: SimulationFrame[] = [];
 let activeProgram: number[] | undefined;
+let programRunner:ReturnType<typeof createProgrammingRunner>|undefined;
+let programKey:string|undefined;
+let programSnapshot:ReturnType<typeof createSimulationSession>|undefined;
 
 function sameSignals(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   const keys = Object.keys(a);
@@ -46,6 +56,14 @@ function runSession(request: Request): Simulation {
   const circuit = request.circuit;
   if (!circuit) throw new Error('模拟缺少电路。');
   const library = request.library ?? {};
+  if(isProgrammingLevel(circuit.levelId)){
+    if(!programRunner){sessionKey=undefined;runtime=undefined;trace=[];activeProgram=undefined;}
+    return runProgrammingSession(request,circuit,library);
+  }
+  if(programRunner){
+    programSnapshot?.shutdown();programSnapshot=undefined;programRunner=undefined;programKey=undefined;
+    sessionKey=undefined;runtime=undefined;trace=[];activeProgram=undefined;
+  }
   const key = JSON.stringify({ caller:request.sessionKey,level: circuit.levelId,
     nodes: circuit.nodes.map(({ position: _position, ...node }) => node), wires: circuit.wires, library });
   if (key !== sessionKey || request.operation === 'reset') {
@@ -72,6 +90,28 @@ function runSession(request: Request): Simulation {
   return recordFrame(simulation, circuit, inputs, tick);
 }
 
+function runProgrammingSession(request:Request,circuit:Circuit,library:ComponentLibrary):Simulation {
+  const key=programmingSessionKey(circuit,library,request.sessionKey),available=programmingCases(circuit.levelId);
+  if(key!==programKey||!programRunner){
+    const previous=programRunner?.currentCase().id,selected=request.caseId??(available.some(c=>c.id===previous)?previous:undefined);
+    programSnapshot?.shutdown();
+    programRunner=createProgrammingRunner(circuit,library,selected,true);programSnapshot=createSimulationSession(circuit,library);programKey=key;trace=[];
+  }
+  const runner=programRunner,inputs={E:1,R:0,...request.inputs};
+  if(request.operation==='reset'){runner.restart(runner.currentCase().id);trace=[];}
+  else if(request.operation==='programCase'){
+    if(typeof request.caseId!=='string')throw new Error('缺少编程测试用例。');
+    runner.restart(request.caseId);trace=[];
+  }else if(request.operation==='replay'){
+    runner.replay(request.scenarioId!,request.stepIndex!);trace=[];
+  }else if(request.operation==='tick')runner.step(inputs);
+  else if(request.operation==='programStep')request.instruction===false?runner.step(inputs):runner.instruction(inputs);
+  else if(request.operation==='programRun')runner.run(inputs,{breakpoints:request.breakpoints??[],maxCycles:request.maxCycles??90});
+  const snapshot=programSnapshot!.snapshot(inputs,runner.state());
+  trace=runner.frames();
+  return {...recordFrame(snapshot,circuit,inputs,false),program:runner.program()};
+}
+
 globalThis.addEventListener('message', (event: MessageEvent<Request>) => {
   const request = event.data;
   try {
@@ -79,7 +119,7 @@ globalThis.addEventListener('message', (event: MessageEvent<Request>) => {
     if (request.operation === 'load') {
       if (typeof request.text !== 'string') throw new Error('存档内容无效。');
       result = parseWorkspace(request.text);
-    } else if (['simulate', 'tick', 'reset', 'replay'].includes(request.operation)) {
+    } else if (['simulate', 'tick', 'reset', 'replay','programStep','programRun','programCase'].includes(request.operation)) {
       result = runSession(request);
     } else if (request.operation === 'judge') {
       result = judge(request.circuit!, request.library ?? {});

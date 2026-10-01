@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Circuit, ComponentLibrary, Inputs, Simulation } from './contracts';
+import { programmingSessionKey } from './programmingMachine';
 
 interface Reply<T> { id: number; result?: T; error?: string; }
 export function backgroundTask<T>(operation: 'judge' | 'verify' | 'load', payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
@@ -22,12 +23,12 @@ export function useSimulation(circuit: Circuit, inputs: Inputs, library: Compone
   const [state, setState] = useState({ ...empty, error: '', pending: true });
   const workerRef = useRef<Worker | null>(null);
   const requestRef = useRef(0);
-  const graphKey = JSON.stringify({ epoch, level: circuit.levelId, nodes: circuit.nodes.map(({ position: _position, ...node }) => node), wires: circuit.wires, library });
+  const graphKey = programmingSessionKey(circuit,library,String(epoch));
   const inputKey = JSON.stringify(inputs);
   const payloadRef = useRef({ circuit, inputs, library, sessionKey: graphKey });
   payloadRef.current = { circuit, inputs, library, sessionKey: graphKey };
   const sentSession = useRef('');
-  const send = useCallback((operation: 'simulate' | 'tick' | 'reset' | 'replay', extra: Record<string, unknown> = {}) => {
+  const send = useCallback((operation: 'simulate' | 'tick' | 'reset' | 'replay' | 'programStep' | 'programRun' | 'programCase', extra: Record<string, unknown> = {}) => {
     const payload = payloadRef.current;
     const changed = sentSession.current !== payload.sessionKey;
     sentSession.current = payload.sessionKey;
@@ -51,5 +52,8 @@ export function useSimulation(circuit: Circuit, inputs: Inputs, library: Compone
   const tick = useCallback(() => send('tick'), [send]);
   const reset = useCallback(() => send('reset'), [send]);
   const replay = useCallback((scenarioId: string, stepIndex: number) => send('replay', { scenarioId, stepIndex }), [send]);
-  return { ...state, tick, reset, replay };
+  const programStep=useCallback((instruction=true)=>send('programStep',{instruction}),[send]);
+  const programRun=useCallback((breakpoints:number[],maxCycles=90)=>send('programRun',{breakpoints,maxCycles}),[send]);
+  const programCase=useCallback((caseId:string)=>send('programCase',{caseId}),[send]);
+  return { ...state, tick, reset, replay,programStep,programRun,programCase };
 }

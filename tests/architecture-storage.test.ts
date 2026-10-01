@@ -26,22 +26,22 @@ function romDefinition(): ComponentDefinition {
     ] } };
 }
 
-it('migrates v3 to forty-four fresh drafts while preserving proofs and saved input values', () => {
+it('migrates v3 to fifty-six drafts while preserving proofs and saved input values', () => {
   const legacy = legacy32();
   legacy.currentLevel = 2;
   legacy.circuits[1] = connect(createCircuit(1), 'A', 'out', 'Y', 'in');
   legacy.proofs[1] = structuredClone(legacy.circuits[1]);
   legacy.inputs[24] = { D: 255, E: 1, R: 0 };
   const restored = parseWorkspace(JSON.stringify(legacy));
-  expect(restored.version).toBe(4);
-  expect(Object.keys(restored.circuits)).toHaveLength(44);
+  expect(restored.version).toBe(5);
+  expect(Object.keys(restored.circuits)).toHaveLength(56);
   expect(restored.currentLevel).toBe(2);
   expect(restored.circuits[1]).toEqual(legacy.circuits[1]);
   expect(restored.proofs[1]).toEqual(legacy.proofs[1]);
   expect(restored.inputs[24]).toEqual({ D: 255, E: 1, R: 0 });
   expect(restored.circuits[33].wires).toEqual([]);
   expect(restored.circuits[44].wires).toEqual([]);
-  expect(restored.library).toEqual({});
+  expect(restored.library).toEqual(createWorkspace().library);
 });
 
 it('rejects architecture entries under a v3 version instead of silently accepting them', () => {
@@ -55,11 +55,11 @@ it('imports the historical v3 demonstration without rewriting its saved drafts',
   const original = JSON.parse(text);
   expect(original.version).toBe(3);
   const restored = parseWorkspace(text, { verifyProofs: false });
-  expect(restored.version).toBe(4);
-  expect(Object.keys(restored.circuits)).toHaveLength(44);
+  expect(restored.version).toBe(5);
+  expect(Object.keys(restored.circuits)).toHaveLength(56);
   expect(restored.currentLevel).toBe(original.currentLevel);
   expect(restored.proofs).toEqual(original.proofs);
-  expect(restored.library).toEqual(original.library);
+  expect(restored.library).toMatchObject(original.library);
   expect(restored.circuits[32]).toEqual(original.circuits[32]);
 });
 
@@ -79,7 +79,7 @@ it('retains ROM programs, sixteen-bit interfaces and nested immutable dependenci
       { id: 'address', source: 'Addr', sourceHandle: 'out', target: 'child', targetHandle: 'Addr' },
       { id: 'instruction', source: 'child', sourceHandle: 'Word', target: 'Word', targetHandle: 'in' },
     ] } };
-  workspace.library = { 'rom-bank@1': leaf, 'outer-bank@2': outer };
+  workspace.library = { ...workspace.library, 'rom-bank@1': leaf, 'outer-bank@2': outer };
   const raw = JSON.parse(JSON.stringify(workspace));
   raw.library['rom-bank@1'].graph.nodes[1].runtimeValue = 123;
   raw.state = { cycle: 19, registers: { cpu: 7 }, memories: { ram: [255] } };
@@ -97,13 +97,13 @@ it('retains ROM programs, sixteen-bit interfaces and nested immutable dependenci
 it.each([[], Array(256).fill(65535)].map(words => ({ words })))('accepts a ROM program at its length and word boundaries', ({ words }) => {
   const workspace = createWorkspace(), definition = romDefinition();
   definition.graph.nodes[1].words = words;
-  workspace.library = { 'rom-bank@1': definition };
+  workspace.library = { ...workspace.library, 'rom-bank@1': definition };
   expect(parseWorkspace(JSON.stringify(workspace)).library['rom-bank@1'].graph.nodes[1].words).toEqual(words);
 });
 
 it.each([[-1], [65536], [1.5], ['1'], Array(257).fill(0), null, {}].map(words => ({ words })))('rejects malformed or oversized ROM words', ({ words }) => {
   const workspace = createWorkspace(), definition = romDefinition();
-  workspace.library = { 'rom-bank@1': definition };
+  workspace.library = { ...workspace.library, 'rom-bank@1': definition };
   const raw = JSON.parse(JSON.stringify(workspace));
   raw.library['rom-bank@1'].graph.nodes[1].words = words;
   expect(() => parseWorkspace(JSON.stringify(raw))).toThrow(/ROM/);
@@ -132,7 +132,7 @@ it('saves graph structure without node runtime fields or programs on non-ROM nod
 it.each([8, 4, 1])('rejects a ROM stored at %i bits', bits => {
   const workspace = createWorkspace(), definition = romDefinition();
   definition.graph.nodes[1].bits = bits;
-  workspace.library = { 'rom-bank@1': definition };
+  workspace.library = { ...workspace.library, 'rom-bank@1': definition };
   expect(() => parseWorkspace(JSON.stringify(workspace))).toThrow(/位宽/);
 });
 
@@ -140,7 +140,7 @@ it('rejects a sixteen-bit program wired into an eight-bit output', () => {
   const workspace = createWorkspace(), definition = romDefinition();
   definition.outputs[0].bits = 8;
   definition.graph.nodes[2].bits = 8;
-  workspace.library = { 'rom-bank@1': definition };
+  workspace.library = { ...workspace.library, 'rom-bank@1': definition };
   expect(() => parseWorkspace(JSON.stringify(workspace))).toThrow(/位宽/);
 });
 

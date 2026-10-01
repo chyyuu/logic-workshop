@@ -22,11 +22,11 @@ it('reports local storage access failures without throwing', () => {
   expect(loadWorkspace().error).toContain('存档读取失败');
 });
 
-it('creates all forty-four drafts and a versioned component library', () => {
+it('creates all fifty-six drafts and the component library required by fixed CPUs', () => {
   const state = createWorkspace();
-  expect(state.version).toBe(4);
-  expect(Object.keys(state.circuits)).toHaveLength(44);
-  expect(state.library).toEqual({});
+  expect(state.version).toBe(5);
+  expect(Object.keys(state.circuits)).toHaveLength(56);
+  expect(Object.keys(state.library).length).toBeGreaterThan(0);
 });
 
 it('migrates the four-lesson format without losing progress', () => {
@@ -39,11 +39,11 @@ it('migrates the four-lesson format without losing progress', () => {
     for (const node of circuit.nodes) delete node.bits;
   }
   const restored = parseWorkspace(JSON.stringify(legacy));
-  expect(restored.version).toBe(4);
+  expect(restored.version).toBe(5);
   expect(restored.currentLevel).toBe(2);
   expect(restored.proofs[1].wires).toHaveLength(1);
   expect(restored.inputs[1]).toEqual({ A: 1 });
-  expect(Object.keys(restored.circuits)).toHaveLength(44);
+  expect(Object.keys(restored.circuits)).toHaveLength(56);
 });
 
 it('can structurally parse candidate proofs for asynchronous verification', () => {

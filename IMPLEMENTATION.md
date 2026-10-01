@@ -1,3 +1,13 @@
+# Programming applications extension (2026-10-01)
+
+Delivered lessons45–56 on the existing inspectable gate CPU. Assembly source is translated toROM words; actualgatekernel executes all programs, with independent mathematical task expectations. NoCPU interpreter or newinstruction semantics. Public379cases inspect output events, normal halt and requiredRAM.
+
+- assembler.ts: two-pass labels, exact operand/byte bounds and source line diagnostics; source↔ROM savedatomically.
+- programmingMachine.ts: canonical root44 +dependencyclosure, fixedelectricalgraph, movablelayout and editable rootROM. programmingRunner.ts executes seededcases, counts repeated OUT, respects E/R, instructionstep, fetchbreakpoints,90cyclebatches and total budgets. DigitalJS observes equivalent actualstate; Worker preserves recent64cycles and resets crossstage sessions.
+- ProgrammingPanel.tsx/App: source/listing, explicit E/R, instruction/cycle stepping, run/pause, case selector, RAM/output, boundedfailure replay, undo/redo. Identicalassembly apply forces fresh session; import clears unsavededitor/temporarybreakpoints.
+- storage.ts v5 accepts v1–v4 with exact oldlevel maxima, fills 56drafts, preserves complete components/source and rejects mismatchedsource or alteredfixedCPU. Runtime/debug data stays transient.
+- Design, plan, examplearchive and12reference programs in docs/programming-applications-*.md/json and docs/programming-reference-programs.md. Final verification results are in docs/programming-applications-acceptance.md.
+
 # Twenty lessons and reusable components
 
 ## Computer architecture extension (2026-10-01)

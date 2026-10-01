@@ -381,3 +381,83 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
   .test-panel-footer { padding: 7px 12px; flex-wrap: wrap; gap: 4px; }
   .test-panel table { min-width: 340px; }
 }
+
+.programming-machine-hidden { display: none; }
+.programming-sidebar-note { padding: 17px 22px; font-size: 11px; color: #71847a; line-height: 1.7; }
+.programming-sidebar-note strong { color: #3c7558; }
+.programming-sidebar-note p { margin-top: 8px; }
+.programming-workbench { min-height: 0; flex: 1; padding: 18px 22px; overflow-y: auto; background: #f5f8f6; }
+.programming-workbench button, .programming-workbench select { font-size: 11px; }
+.programming-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.programming-heading>div { display: flex; align-items: center; gap: 8px; color: #2c6c50; }
+.programming-heading strong { font-size: 16px; }
+.programming-heading span { font-size: 10px; color: #829087; }
+.programming-heading .secondary-button { white-space: nowrap; padding: 7px 10px; }
+.programming-debug-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.programming-debug-toolbar label { display: flex; align-items: center; gap: 7px; color: #688271; font-size: 11px; min-width: 0; }
+.programming-debug-toolbar select { max-width: 270px; padding: 6px; color: #365c47; background: #fff; border: 1px solid #d8e3dc; border-radius: 4px; }
+.programming-debug-toolbar .secondary-button { padding: 6px 9px; display: flex; align-items: center; gap: 5px; }
+.programming-run-status { font-size: 10px; color: #819187; }
+.programming-run-status.stopped { color: #9d7332; }
+.programming-input-summary { margin: 9px 0 14px; font: 10px/1.6 ui-monospace, Consolas, monospace; color: #7a8b81; overflow-wrap: anywhere; }
+.assembly-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.assembly-source, .assembly-listing, .program-output, .program-memory, .program-cases { background: #fff; border: 1px solid #dae5df; border-radius: 5px; min-width: 0; }
+.assembly-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 11px 12px; color: #3f6751; font-size: 11px; border-bottom: 1px solid #e7eee9; }
+.assembly-section-heading span { font-size: 9px; color: #8b9c90; }
+.assembly-source textarea { display: block; width: 100%; height: 280px; padding: 13px; border: 0; outline-color: #72b18d; background: #fcfefc; color: #345d43; font: 13px/1.7 ui-monospace, Consolas, monospace; resize: vertical; tab-size: 2; }
+.assembly-apply { padding: 10px 12px; display: flex; gap: 9px; align-items: center; justify-content: space-between; border-top: 1px solid #e7eee9; min-height: 55px; }
+.assembly-apply p { font-size: 10px; overflow-wrap: anywhere; }
+.assembly-error { color: #b64d43; }.assembly-valid { color: #849b8b; }
+.assembly-apply .test-button { padding: 8px 10px; white-space: nowrap; font-size: 11px; }
+.assembly-listing-scroll { max-height: 335px; overflow: auto; }
+.programming-workbench table { border-collapse: collapse; width: 100%; font: 10px/1.5 ui-monospace, Consolas, monospace; }
+.programming-workbench th { font-size: 9px; color: #86968c; text-align: left; font-weight: 400; white-space: nowrap; }
+.programming-workbench td, .programming-workbench th { padding: 6px 8px; border-bottom: 1px solid #edf2ee; }
+.assembly-listing .current-instruction { background: #e0f1e6; color: #2a6d49; }
+.source-line-number { display: inline-block; width: 22px; color: #9aa99f; font-size: 9px; }
+.breakpoint-button { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 3px; }
+.breakpoint-button>span { border: 1px solid #bdcbc2; width: 8px; height: 8px; border-radius: 50%; }
+.breakpoint-button.set>span { background: #c7594b; border-color: #c7594b; }
+.empty-program { padding: 30px 14px; font-size: 11px; color: #91a397; }
+.programming-observation { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 14px; margin: 14px 0; }
+.program-output>p { color: #2f7250; padding: 12px; font: 14px/1.6 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; max-height: 95px; overflow-y: auto; }
+.program-output>small { display: block; padding: 0 12px 12px; font-size: 9px; color: #92a296; line-height: 1.6; }
+.memory-cells { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); padding: 10px; gap: 4px; }
+.memory-cells>div { padding: 4px 2px; background: #f7f9f7; text-align: center; border-radius: 3px; }
+.memory-cells>div.input-memory { background: #eaf5ed; }
+.memory-cells dt { font: 8px ui-monospace, Consolas, monospace; color: #95a69a; }
+.memory-cells dd { margin: 3px 0 0; font: 11px ui-monospace, Consolas, monospace; color: #52725c; }
+.program-cases-scroll { overflow: auto; max-height: 240px; }
+.program-cases-scroll th:nth-child(1) { width: 28%; }
+.program-cases-scroll th:nth-child(2) { width: 20%; }
+.program-cases-scroll td { overflow-wrap: anywhere; }
+.program-cases-scroll small { display: block; color: #94a297; font-size: 9px; }
+.case-observe { color: #3d7855; white-space: nowrap; }
+.program-cases-footer { padding: 9px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #93a196; font-size: 9px; }
+.assembly-help { color: #7c9081; font-size: 10px; line-height: 1.7; margin-top: 13px; }
+.assembly-help summary { cursor: pointer; color: #568467; }
+.assembly-help p { margin-top: 8px; }
+.program-failure-detail { display: flex; align-items: flex-start; gap: 8px; padding: 10px; margin-top: 12px; border-radius: 4px; font-size: 10px; color: #a25d43; background: #fff0e9; }
+.programming-workshop .editor-toolbar .edit-tools .tool-divider, .programming-workshop .editor-toolbar .edit-tools button:disabled { display: none; }
+.programming-workshop .board:not(.programming-machine-hidden) { min-height: 330px; flex: none; }
+.programming-workshop .board-area:has(.board:not(.programming-machine-hidden)) { overflow-y: auto; }
+.programming-workshop .board-area:has(.board:not(.programming-machine-hidden)) .programming-workbench { flex: none; overflow: visible; }
+@media (max-width: 1250px) {
+  .programming-heading span { display: none; }
+  .programming-workbench { padding: 14px; }
+  .assembly-section-heading { flex-wrap: wrap; }
+  .programming-workbench td, .programming-workbench th { padding: 5px; }
+}
+@media (max-width: 759px) {
+  .programming-workbench { padding: 12px; }
+  .assembly-columns, .programming-observation { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .assembly-source textarea { height: 230px; }
+  .assembly-listing-scroll { max-height: 200px; }
+  .programming-heading strong { font-size: 14px; }
+  .programming-debug-toolbar label { width: 100%; }
+  .programming-debug-toolbar select { flex: 1; max-width: none; width: 0; }
+  .programming-run-status { width: 100%; }
+  .program-cases-scroll table { min-width: 330px; }
+  .program-cases-footer { flex-wrap: wrap; }
+  .programming-workshop .toolbar-meta, .programming-workshop .toolbar-title { display: none; }
+}

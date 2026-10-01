@@ -21,7 +21,7 @@ function compareSteps(circuit:Circuit,library:ComponentLibrary,steps:SimulationS
 }
 describe('compiled sequential gate graphs',()=>{
   const library=architectureLibrary();
-  for(const level of levels.filter(l=>l.id>=21&&l.id<=44&&l.mode==='sequential'))it(`matches independent DigitalJS scenarios for lesson ${level.id}`,()=>{
+  for(const level of levels.filter(l=>l.id>=21&&l.id<=44&&l.mode==='sequential'))it(`matches independent DigitalJS scenarios for lesson ${level.id}`,async()=>{
     const circuit=referenceCircuit(level.id);
     for(const scenario of testSequences(level.id)){
       const programmed=scenario.program?{...circuit,nodes:circuit.nodes.map(n=>n.id==='program'?{...n,words:[...scenario.program!]}:n)}:circuit;
@@ -29,6 +29,8 @@ describe('compiled sequential gate graphs',()=>{
       for(const step of scenario.steps){const outputs=fast.step(step.inputs,step.tick);trace.push({cycle:fast.state().cycle,inputs:{...step.inputs},tick:step.tick,outputs});if(trace.length>64)trace.shift();}
       const digital=replaySequence(circuit,library,scenario.steps,scenario.program);
       expect(trace).toEqual(digital.trace);expect(fast.state()).toEqual(digital.state);
+      // Let the test worker deliver progress between complete, unchanged scenario comparisons.
+      await new Promise<void>(resolve => setImmediate(resolve));
     }
   },180000);
   it('commits all register old values simultaneously and conservatively merges unknown reset',()=>{

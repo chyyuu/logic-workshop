@@ -5,6 +5,8 @@ import { getPorts, validateCircuit } from './model';
 import { flattenGraph } from './netlist';
 import { compileCombinational } from './combinationalEvaluator';
 import { compileSequential } from './sequentialEvaluator';
+import { isProgrammingLevel } from './programmingMachine';
+import { judgeProgramming } from './programmingRunner';
 import type { Endpoint } from './netlist';
 import type { Circuit, CircuitNode, ComponentLibrary, Inputs, RuntimeState, Signal, Simulation, SimulationFrame, SimulationStep, TestResult, TestRow } from './contracts';
 export type { Signal, Simulation, TestResult, TestRow } from './contracts';
@@ -189,6 +191,18 @@ export function simulate(circuit:Circuit,inputs:Inputs,library:ComponentLibrary=
   } finally {session.engine.shutdown();}
 }
 
+/** Keep DigitalJS compiled while a Worker performs many batches on the same graph. */
+export function createSimulationSession(circuit:Circuit,library:ComponentLibrary) {
+  const session=checkedSession(circuit,library);
+  return {
+    snapshot(inputs:Inputs,state:RuntimeState):Simulation {
+      const current=initial(session,state);apply(session,circuit,inputs,current);
+      return snapshot(session,circuit,library,current);
+    },
+    shutdown:()=>session.engine.shutdown(),
+  };
+}
+
 export function replaySequence(circuit:Circuit,library:ComponentLibrary,steps:SimulationStep[],program?:number[]):Simulation {
   circuit=withProgram(circuit,program);
   const session=checkedSession(circuit,library),trace:SimulationFrame[]=[];
@@ -206,6 +220,7 @@ export function replaySequence(circuit:Circuit,library:ComponentLibrary,steps:Si
 }
 
 export function judge(circuit:Circuit,library:ComponentLibrary={}):TestResult {
+  if(isProgrammingLevel(circuit.levelId))return judgeProgramming(circuit,library);
   try {
     const level=getLevel(circuit.levelId),rows:TestRow[]=[];
     const error=validateCircuit(circuit,library)[0];if(error)throw new Error(error);

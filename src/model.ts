@@ -1,6 +1,7 @@
 import { getLevel } from './levels';
 import { createId } from './id';
 import { hasCombinationalCycle } from './netlist';
+import { isProgrammingLevel, programmingMachine, validateProgrammingMachine } from './programmingMachine';
 import type { Circuit, CircuitGraph, CircuitNode, ComponentLibrary, GateType, NodeType, Port } from './contracts';
 export type { Circuit, CircuitGraph, CircuitNode, Wire, NodeType } from './contracts';
 
@@ -27,6 +28,7 @@ export function ports(type: NodeType) {
   return { inputs:typed.inputs.map(port=>port.id), outputs:typed.outputs.map(port=>port.id) };
 }
 export function createCircuit(levelId: number): Circuit {
+  if(isProgrammingLevel(levelId))return programmingMachine(levelId);
   const level = getLevel(levelId);
   return { levelId,revision:0,wires:[],nodes:[
     ...level.inputPorts.map((port,i)=>({id:port.id,label:port.id,type:'INPUT' as const,bits:port.bits,position:{x:90,y:level.inputPorts.length===1?190:90+i*145}})),
@@ -49,6 +51,7 @@ function validateGraph(graph: CircuitGraph, library: ComponentLibrary): string[]
     if (![1,2,4,8,16].includes(node.bits??1)) errors.push('端口位宽无效。');
     if (node.type==='ROM'&&node.bits!==16||node.type==='RAM'&&node.bits!==8) errors.push('存储器位宽无效。');
     if (node.words!==undefined&&(node.type!=='ROM'||!Array.isArray(node.words)||node.words.length>256||Array.from(node.words).some(w=>!Number.isInteger(w)||w<0||w>65535))) errors.push('ROM 程序字无效。');
+    if(node.programSource!==undefined&&(node.type!=='ROM'||typeof node.programSource!=='string'||node.programSource.length>32000))errors.push('ROM 程序源文本无效。');
     if (node.type === 'CONST' && (!Number.isInteger(node.value??0)||(node.value??0)<0||(node.value??0)>=2**(node.bits??1))) errors.push('常量超出位宽范围。');
     if (node.type === 'COMPONENT' && !Object.hasOwn(library,node.componentKey??'')) errors.push('组件依赖缺失。');
   }
@@ -116,6 +119,7 @@ export function validateCircuit(circuit: Circuit, library: ComponentLibrary = {}
   let level;
   try { level=getLevel(circuit.levelId); } catch { return [...errors,'关卡不存在。']; }
   errors.push(...validateGraph(circuit,library));
+  if(!errors.length)errors.push(...validateProgrammingMachine(circuit,library));
   const fixed=createCircuit(circuit.levelId).nodes;
   for (const expected of fixed) {
     const actual=circuit.nodes.find(n=>n.id===expected.id);
@@ -155,6 +159,7 @@ export function canConnect(circuit:Circuit,source:string,sourceHandle:string,tar
   try { connect(circuit,source,sourceHandle,target,targetHandle,library);return true; } catch { return false; }
 }
 export function removeSelection(circuit:Circuit,nodeIds:string[],wireIds:string[]):Circuit {
+  if(isProgrammingLevel(circuit.levelId))return circuit;
   const removable=new Set(circuit.nodes.filter(n=>n.type!=='INPUT'&&n.type!=='OUTPUT'&&!([38,44].includes(circuit.levelId)&&n.id==='program')&&nodeIds.includes(n.id)).map(n=>n.id));
   return {...circuit,revision:circuit.revision+1,nodes:circuit.nodes.filter(n=>!removable.has(n.id)),wires:circuit.wires.filter(w=>!wireIds.includes(w.id)&&!removable.has(w.source)&&!removable.has(w.target))};
 }

@@ -8,7 +8,7 @@ import { referenceCircuit } from './fixtures';
 
 test.setTimeout(240_000);
 function stateAt(id: number): Workspace {
-  const state: Workspace = { version: 4, currentLevel: id, library: architectureLibrary(), proofs: {}, circuits: {}, inputs: {} };
+  const state: Workspace = { version: 5, currentLevel: id, library: architectureLibrary(), proofs: {}, circuits: {}, inputs: {} };
   for (const level of levels) {
     state.circuits[level.id] = referenceCircuit(level.id);
     state.inputs[level.id] = Object.fromEntries(level.inputs.map(p => [p, 0]));
@@ -52,7 +52,7 @@ test('a migrated stage-five save unlocks architecture and lets users place 16-bi
   await page.locator('input[type=file]').setInputFiles({ name: 'v3-save.json', mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify({ version: 3, currentLevel: 32, circuits, inputs, proofs: circuits, library: {} })) });
   await expect(page.getByRole('status')).toContainText('存档已导入', { timeout: 90_000 });
-  await expect(page.getByTestId('progress-count')).toHaveText('32 / 44');
+  await expect(page.getByTestId('progress-count')).toHaveText('32 / 56');
   await page.getByRole('button', { name: /第 33 关/ }).click();
   await expect(page.getByRole('heading', { name: '八位加减器', exact: true })).toBeVisible();
   await page.getByRole('combobox', { name: '总线位宽' }).selectOption('16');
@@ -64,7 +64,7 @@ test('a migrated stage-five save unlocks architecture and lets users place 16-bi
   await page.getByRole('button', { name: '关闭组件详情', exact: true }).click();
   await page.getByRole('button', { name: '添加教学组件 八位使能寄存器', exact: true }).click();
   const saved = await exported(page);
-  expect(saved.version).toBe(4);
+  expect(saved.version).toBe(5);
   expect(saved.library['architecture-register8@1'].dependencies).toContain('architecture-mux8@1');
   expect(saved.library['architecture-mux8@1']).toBeDefined();
   await page.getByRole('button', { name: '撤销', exact: true }).click();

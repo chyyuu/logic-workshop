@@ -1,6 +1,7 @@
 import type { GateType, Inputs, Outputs, Port, TestSequence } from './contracts';
 import { sequentialLevels } from './sequentialLevels';
 import { architectureLevels } from './architectureLevels';
+import { programmingLevels } from './programmingLevels';
 export type { GateType, Inputs } from './contracts';
 
 export interface Level {
@@ -19,13 +20,13 @@ export interface Level {
   rewardName?: string;
   expected: (inputs: Inputs) => number;
   expectedOutputs: (inputs: Inputs) => Outputs;
-  mode?: 'sequential';
+  mode?: 'sequential' | 'program';
   sequences?: () => TestSequence[];
   cases?: () => Inputs[];
   defaultProgram?: number[];
 }
 
-export const chapters = ['信号与逻辑门', '选择与分配', '多位信号', '组合运算', '状态与时间', '计算机架构'];
+export const chapters = ['信号与逻辑门', '选择与分配', '多位信号', '组合运算', '状态与时间', '计算机架构', '编程应用'];
 type PortSpec = [string, number];
 const gateUnlocks: [GateType, number][] = [
   ['NAND', 2], ['NOT', 4], ['AND', 5], ['OR', 6], ['XOR', 7], ['XNOR', 8],
@@ -118,6 +119,7 @@ export const levels: Level[] = [
     ['减法可转为 A 加上 B 的反码再加 1。', '每一位反转 B，把初始进位设为 1。', '四位相加的 Sum 就是 Diff；最高位 Cout 反转后得到 Borrow。'], 'Subtract4'),
   ...sequentialLevels,
   ...architectureLevels,
+  ...programmingLevels,
 ];
 
 export function getLevel(id: number): Level {
@@ -128,7 +130,7 @@ export function getLevel(id: number): Level {
 
 export function testInputs(id: number): Inputs[] {
   const level = getLevel(id);
-  if (level.mode === 'sequential') return [];
+  if (level.mode === 'sequential' || level.mode === 'program') return [];
   if (level.cases) return level.cases();
   const ports = level.inputPorts;
   const totalBits = ports.reduce((total, p) => total + p.bits, 0);

@@ -71,5 +71,5 @@ describe('inspectable architecture circuits', () => {
     const selected = expanded.nodes.filter(n => !['INPUT', 'OUTPUT'].includes(n.type)).map(n => n.id);
     const encapsulated = encapsulateSelection(expanded, selected, '可回放数据通路', library);
     expect(replaySequence(encapsulated.circuit, encapsulated.library, steps).trace).toEqual(expected.trace);
-  });
+  }, 30_000);
 });

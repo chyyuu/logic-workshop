@@ -7,7 +7,7 @@ import { judge, replaySequence } from '../src/simulator';
 
 describe('architecture curriculum', () => {
   it('exposes the twelve architecture lessons with workable temporal scenarios', () => {
-    expect(levels.map(level => level.id)).toEqual(Array.from({ length: 44 }, (_, i) => i + 1));
+    expect(levels.slice(0, 44).map(level => level.id)).toEqual(Array.from({ length: 44 }, (_, i) => i + 1));
     expect(chapters[5]).toBe('计算机架构');
     for (let id = 33; id <= 44; id++) {
       const level = getLevel(id);

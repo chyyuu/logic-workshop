@@ -8,7 +8,7 @@ import { sequentialReferenceCircuit } from './sequential-fixtures';
 
 afterEach(() => vi.unstubAllGlobals());
 
-it('migrates v2 drafts, inputs, proofs and component versions while adding twenty-four fresh drafts', () => {
+it('migrates v2 drafts, inputs, proofs and component versions while adding thirty-six fresh drafts', () => {
   const workspace = createWorkspace();
   workspace.circuits[1] = connect(workspace.circuits[1], 'A', 'out', 'Y', 'in');
   workspace.proofs[1] = structuredClone(workspace.circuits[1]);
@@ -24,14 +24,14 @@ it('migrates v2 drafts, inputs, proofs and component versions while adding twent
     circuits: Object.fromEntries(Object.entries(workspace.circuits).filter(([id]) => Number(id) <= 20)),
     inputs: Object.fromEntries(Object.entries(workspace.inputs).filter(([id]) => Number(id) <= 20)) };
   const restored = parseWorkspace(JSON.stringify(legacy));
-  expect(restored.version).toBe(4);
+  expect(restored.version).toBe(5);
   expect(restored.currentLevel).toBe(2);
   expect(restored.circuits[1]).toEqual(workspace.circuits[1]);
   expect(restored.proofs[1]).toEqual(workspace.proofs[1]);
   expect(restored.inputs[12]).toEqual({ A: 15, B: 9, S: 0 });
-  expect(restored.library).toEqual(legacy.library);
+  expect(restored.library).toMatchObject(legacy.library);
   expect(restored.library['outer@1'].dependencies).toEqual(['leaf@1']);
-  expect(Object.keys(restored.circuits)).toHaveLength(44);
+  expect(Object.keys(restored.circuits)).toHaveLength(56);
   expect(restored.circuits[24].wires).toEqual([]);
 });
 
@@ -65,13 +65,13 @@ it('round-trips eight-bit DFF definitions and discards runtime fields from graph
   const workspace = createWorkspace(), circuit = sequentialReferenceCircuit(24);
   const packaged = encapsulateSelection(circuit,
     circuit.nodes.filter(node => node.type !== 'INPUT' && node.type !== 'OUTPUT').map(node => node.id), '八位寄存器');
-  workspace.library = packaged.library;
+  workspace.library = { ...workspace.library, ...packaged.library };
   workspace.circuits[24] = packaged.circuit;
   workspace.inputs[24] = { D: 255, E: 1, R: 0 };
   const raw = JSON.parse(JSON.stringify(workspace));
   raw.circuits[24].state = { cycle: 90, registers: { stale: 127 } };
-  const definition = Object.values(workspace.library)[0];
-  const key = Object.keys(workspace.library)[0];
+  const definition = Object.values(packaged.library)[0];
+  const key = Object.keys(packaged.library)[0];
   raw.library[key].graph.nodes.find((node: { type: string }) => node.type === 'DFF').runtimeValue = 255;
   const restored = parseWorkspace(JSON.stringify(raw));
   expect(restored.inputs[24]).toEqual({ D: 255, E: 1, R: 0 });

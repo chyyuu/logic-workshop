@@ -1,0 +1,34 @@
+# Dependencies and generated build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Browser test output (including per-run output directories)
+test-results*/
+playwright-report/
+playwright/.cache/
+blob-report/
+
+# Package manager and tool caches
+.npm-cache/
+.npm/
+.vite/
+.cache/
+
+# Local work files, server logs, and PID files
+work/
+*.log
+server.pid
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

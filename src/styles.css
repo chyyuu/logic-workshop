@@ -335,6 +335,45 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .component-preview { flex: 1; min-height: 0; background: #f5f7f8; }
 .component-dialog>footer { padding: 10px 20px; font-size: 11px; color: #8a9a91; overflow-wrap: anywhere; }
 .test-feedback .secondary-button { margin-top: 12px; }
+.teaching-components { padding: 15px 13px 0; overflow-y: auto; max-height: 28vh; flex-shrink: 0; }
+.teaching-components .sidebar-section-title { padding: 0 10px; }
+.teaching-components>p { color: #82938d; font-size: 10px; padding: 7px 10px 10px; }
+.teaching-components .library-item { margin-bottom: 9px; }
+.architecture-monitor { margin-top: 19px; padding: 13px; border: 1px solid #deebe4; border-radius: 6px; background: #f5faf7; }
+.architecture-monitor h3 { display: flex; align-items: center; gap: 7px; }
+.architecture-monitor dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 0 0 10px; }
+.architecture-monitor dl>div { padding: 6px 7px; border: 1px solid #e2eae5; border-radius: 3px; background: #fff; }
+.architecture-monitor dt { color: #7e938a; font-size: 9px; }
+.architecture-monitor dd { margin: 0; color: #275d46; font: 13px ui-monospace, Consolas, monospace; }
+.machine-phase { color: #2d7155; font-size: 11px; }
+.machine-instruction { color: #658377; font: 10px ui-monospace, Consolas, monospace; margin-top: 7px; overflow-wrap: anywhere; }
+.machine-note { margin-top: 10px; color: #7a9085; font-size: 10px; }
+.scenario-program { background: #fff3d8; color: #987023; padding: 7px; margin: 9px 0; font-size: 10px; border-radius: 3px; }
+.architecture-monitor .secondary-button { margin-top: 12px; font-size: 11px; }
+.program-dialog { display: flex; flex-direction: column; width: min(830px, calc(100vw - 32px)); height: min(680px, calc(100dvh - 32px)); border-radius: 8px; background: #fff; overflow: hidden; }
+.program-dialog>header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--border); }
+.program-dialog h2 { font-size: 17px; }
+.program-editor-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; padding: 20px; min-height: 0; flex: 1; overflow-y: auto; }
+.program-text { display: flex; flex-direction: column; min-height: 0; }
+.program-text label { color: #6c8579; font-size: 12px; margin-bottom: 9px; }
+.program-text textarea { flex: 1; min-height: 200px; width: 100%; resize: none; border: 1px solid #d9e5df; border-radius: 5px; padding: 12px; color: #32654a; background: #f9fcfa; font: 14px/1.6 ui-monospace, Consolas, monospace; }
+.program-text p { font-size: 11px; color: #86988e; margin-top: 10px; }
+.program-text .program-error { color: #bb4e43; }
+.program-list h3 { color: #688276; font-size: 12px; margin: 0 0 10px; }
+.program-list table { border-collapse: collapse; width: 100%; font: 11px ui-monospace, Consolas, monospace; }
+.program-list th { text-align: left; color: #8a9d92; font-weight: 400; }
+.program-list td, .program-list th { padding: 5px 6px; border-bottom: 1px solid #edf2ee; }
+.program-list .current-instruction { background: #def2e6; color: #246949; }
+.program-list .pagination { margin-top: 9px; justify-content: flex-end; }
+.program-dialog>footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--border); }
+.program-dialog>footer p { color: #88998f; font-size: 10px; }
+.program-dialog>footer>div { display: flex; gap: 10px; }
+@media (max-width: 759px) {
+  .program-editor-body { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .program-text textarea { flex: none; height: 230px; }
+  .program-dialog>footer { flex-wrap: wrap; }
+  .program-dialog>footer>div { margin-left: auto; }
+}
 @media (max-width: 759px) {
   .edit-tools .tool-button[aria-label="复制所选组件"] { display: none; }
   .editor-toolbar { padding-left: 8px; padding-right: 8px; }

@@ -5,7 +5,7 @@ import { validateCircuit } from '../src/model';
 import { referenceCircuit } from './fixtures';
 
 const caseCounts = [2, 4, 2, 4, 4, 4, 4, 8, 8, 4, 16, 512, 16, 256, 4, 8, 32, 512, 16, 256];
-const combinationalLevels = levels.filter(level => level.mode !== 'sequential');
+const combinationalLevels = levels.slice(0, 20).filter(level => level.mode !== 'sequential');
 
 describe('all twenty lesson contracts and legal solutions', () => {
   it('has consecutive ids and enumerates every input exactly once', () => {

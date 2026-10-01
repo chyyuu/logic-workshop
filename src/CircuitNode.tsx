@@ -13,11 +13,11 @@ export interface CircuitNodeData extends Record<string, unknown> {
 }
 export type FlowNode = Node<CircuitNodeData, 'circuit'>;
 export function nodeDimensions(kind: NodeType, ports: { inputs: Port[]; outputs: Port[] }) {
-  return { width: kind === 'COMPONENT' || kind === 'DFF' ? 180 : 130, height: Math.max(106, 46 + Math.max(ports.inputs.length, ports.outputs.length) * 25) };
+  return { width: ['COMPONENT', 'DFF', 'ROM', 'RAM'].includes(kind) ? 180 : 130, height: Math.max(106, 46 + Math.max(ports.inputs.length, ports.outputs.length) * 25) };
 }
 
 export function GateSymbol({ type, small = false }: { type: GateType; small?: boolean }) {
-  if (type === 'DFF') return <MemoryStick className={small ? 'gate-symbol small' : 'gate-symbol'} aria-label="DFF 触发器" />;
+  if (type === 'DFF' || type === 'ROM' || type === 'RAM') return <MemoryStick className={small ? 'gate-symbol small' : 'gate-symbol'} aria-label={type === 'DFF' ? 'DFF 触发器' : `${type} 存储器`} />;
   if (type === 'SPLIT' || type === 'JOIN' || type === 'CONST') {
     const Icon = type === 'SPLIT' ? Split : type === 'JOIN' ? Combine : Hash;
     return <Icon className={small ? 'gate-symbol small' : 'gate-symbol'} aria-label={type} />;
@@ -63,7 +63,7 @@ export function CircuitNodeView({ id, data, selected }: NodeProps<FlowNode>) {
       title={`${data.label}.${p.label} · ${p.bits} bit · ${v}`} role="button" tabIndex={0}
       onClick={event => { event.stopPropagation(); data.onPort(id, p.id, direction); }}
       onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); data.onPort(id, p.id, direction); } }}>
-      {(total > 2 || data.kind === 'COMPONENT' || data.kind === 'DFF') && <span className={`port-label ${direction}`}>{p.label}</span>}
+      {(total > 2 || ['COMPONENT', 'DFF', 'ROM', 'RAM'].includes(data.kind)) && <span className={`port-label ${direction}`}>{p.label}</span>}
     </Handle>;
   };
   return <div style={dimensions} className={`circuit-node ${isInput || isOutput ? 'io-node' : 'gate-node'} ${signalClass(data.value)} ${selected ? 'selected' : ''} ${data.failed ? 'failed-node' : ''}`}

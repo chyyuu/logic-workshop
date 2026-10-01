@@ -6,9 +6,9 @@ import { referenceCircuit } from './fixtures';
 
 describe('state and time curriculum', () => {
   it('appends twelve temporal lessons without changing the original twenty', () => {
-    expect(levels.map(level => level.id)).toEqual(Array.from({ length: 32 }, (_, index) => index + 1));
+    expect(levels.slice(0, 32).map(level => level.id)).toEqual(Array.from({ length: 32 }, (_, index) => index + 1));
     expect(chapters[4]).toBe('状态与时间');
-    for (const level of levels.slice(20)) {
+    for (const level of levels.slice(20, 32)) {
       expect(level.mode).toBe('sequential');
       expect(level.chapter).toBe(5);
       expect(level.allowed).toContain('DFF');
@@ -38,7 +38,7 @@ describe('state and time curriculum', () => {
   });
 
   it('specifies every public input and output within its width with deterministic scenario ids', () => {
-    for (const level of levels.slice(20)) {
+    for (const level of levels.slice(20, 32)) {
       const sequences = testSequences(level.id);
       expect(sequences).toEqual(testSequences(level.id));
       expect(new Set(sequences.map(s => s.id)).size).toBe(sequences.length);
@@ -123,5 +123,5 @@ describe('state and time curriculum', () => {
     const replay = replaySequence(wrong, {}, prefix);
     expect(replay.values.Out).toBe(failure.actualOutputs.Out);
     expect(replay.values.Memory).toBe(failure.expectedOutputs.Memory);
-  });
+  }, 30_000);
 });

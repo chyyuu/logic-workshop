@@ -34,7 +34,7 @@ export function hasCombinationalCycle(graph:CircuitGraph,library:ComponentLibrar
   const {nodes,wires}=flattenGraph(graph,library),types=new Map(nodes.map(n=>[n.id,n.node.type]));
   const outgoing=new Map<string,string[]>(),indegree=new Map(nodes.map(n=>[n.id,0]));
   for (const {from,to} of wires) {
-    if (types.get(to.id)==='DFF') continue;
+    if (types.get(to.id)==='DFF'||types.get(to.id)==='RAM'&&to.port!=='addr') continue;
     outgoing.set(from.id,[...(outgoing.get(from.id)??[]),to.id]);
     indegree.set(to.id,indegree.get(to.id)!+1);
   }
@@ -54,7 +54,7 @@ export function hasSequential(graph:CircuitGraph,library:ComponentLibrary={}):bo
   const visited=new Set<string>();
   function search(graph:CircuitGraph):boolean {
     for (const node of graph.nodes) {
-      if (node.type==='DFF') return true;
+      if (node.type==='DFF'||node.type==='RAM') return true;
       if (node.type==='COMPONENT'&&!visited.has(node.componentKey!)) {
         visited.add(node.componentKey!);
         const definition=library[node.componentKey!];

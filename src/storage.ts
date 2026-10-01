@@ -5,7 +5,7 @@ import type { Circuit, CircuitGraph, CircuitNode, ComponentDefinition, Component
 
 export const STORAGE_KEY = 'logic-workshop.v1';
 export interface Workspace {
-  version: 3;
+  version: 4;
   currentLevel: number;
   circuits: Record<number, Circuit>;
   proofs: Record<number, Circuit>;
@@ -14,16 +14,16 @@ export interface Workspace {
 }
 
 export function createWorkspace(): Workspace {
-  return { version: 3, currentLevel: 1, proofs: {}, library: {},
+  return { version: 4, currentLevel: 1, proofs: {}, library: {},
     circuits: Object.fromEntries(levels.map(level => [level.id, createCircuit(level.id)])),
     inputs: Object.fromEntries(levels.map(level => [level.id, Object.fromEntries(level.inputs.map(name => [name, 0]))])) };
 }
 
-const nodeTypes: NodeType[] = ['INPUT', 'OUTPUT', 'NAND', 'NOT', 'AND', 'OR', 'XOR', 'XNOR', 'CONST', 'SPLIT', 'JOIN', 'DFF', 'COMPONENT'];
+const nodeTypes: NodeType[] = ['INPUT', 'OUTPUT', 'NAND', 'NOT', 'AND', 'OR', 'XOR', 'XNOR', 'CONST', 'SPLIT', 'JOIN', 'DFF', 'ROM', 'RAM', 'COMPONENT'];
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(value)
   && !['__proto__', 'constructor', 'prototype'].includes(value);
 const validLabel = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 160;
-const validBits = (value: unknown): value is number => value === 1 || value === 2 || value === 4 || value === 8;
+const validBits = (value: unknown): value is number => value === 1 || value === 2 || value === 4 || value === 8 || value === 16;
 function record(value: unknown, error: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(error);
   return value as Record<string, unknown>;
@@ -44,11 +44,22 @@ function parseGraph(raw: unknown): CircuitGraph {
       throw new Error('组件依赖引用无效。');
     }
     const bits = node.bits === undefined ? 1 : node.bits as number;
+    if ((node.type === 'ROM' && bits !== 16) || (node.type === 'RAM' && bits !== 8)) {
+      throw new Error('存储器位宽无效。');
+    }
+    if (node.words !== undefined) {
+      if (node.type !== 'ROM') throw new Error('只有 ROM 节点可以保存程序。');
+      if (!Array.isArray(node.words) || node.words.length > 256
+        || node.words.some(word => typeof word !== 'number' || !Number.isInteger(word) || word < 0 || word > 65535)) {
+        throw new Error('ROM 程序必须包含至多 256 个十六位整数。');
+      }
+    }
     if (node.value !== undefined && (typeof node.value !== 'number' || !Number.isInteger(node.value) || node.value < 0 || node.value >= 2 ** bits)) {
       throw new Error('常量数值无效。');
     }
     return { id: node.id, type: node.type as NodeType, label: node.label, position: { x: position.x, y: position.y },
       ...(node.bits === undefined ? {} : { bits }), ...(node.value === undefined ? {} : { value: node.value as number }),
+      ...(node.type === 'ROM' && node.words !== undefined ? { words: [...node.words as number[]] } : {}),
       ...(node.type === 'COMPONENT' ? { componentKey: node.componentKey as string } : {}) };
   });
   const wires: Wire[] = graph.wires.map(value => {
@@ -112,13 +123,13 @@ function parseLibrary(raw: unknown): ComponentLibrary {
 export function parseWorkspace(text: string, options: { verifyProofs?: boolean } = {}): Workspace {
   if (text.length > 4_000_000) throw new Error('存档超过 4 MB 限制。');
   const raw = record(JSON.parse(text), '这不是兼容的逻辑工坊存档。');
-  if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3) throw new Error('这不是兼容的逻辑工坊存档。');
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4) throw new Error('这不是兼容的逻辑工坊存档。');
   const circuits = record(raw.circuits, '存档缺少电路。');
   const proofs = raw.proofs === undefined ? {} : record(raw.proofs, '通关记录格式无效。');
   const inputs = raw.inputs === undefined ? {} : record(raw.inputs, '输入状态格式无效。');
   const workspace = createWorkspace();
   workspace.library = raw.version === 1 ? {} : parseLibrary(raw.library);
-  const maximumSavedLevel = raw.version === 1 ? 4 : raw.version === 2 ? 20 : levels.length;
+  const maximumSavedLevel = raw.version === 1 ? 4 : raw.version === 2 ? 20 : raw.version === 3 ? 32 : levels.length;
   const checkLevelKeys = (value: Record<string, unknown>) => {
     if (Object.keys(value).some(key => !/^[1-9][0-9]*$/.test(key) || Number(key) > maximumSavedLevel)) {
       throw new Error('存档包含无效关卡编号。');
@@ -167,6 +178,23 @@ export function loadWorkspace(): { workspace: Workspace; savedText?: string; err
 }
 
 export function saveWorkspace(workspace: Workspace) {
-  const { version, currentLevel, circuits, proofs, inputs, library } = workspace;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ version, currentLevel, circuits, proofs, inputs, library }));
+  const graph = (value: CircuitGraph): CircuitGraph => ({
+    nodes: value.nodes.map(({ id, type, label, position, bits, value: constant, componentKey, words }) => ({
+      id, type, label, position: { x: position.x, y: position.y },
+      ...(bits === undefined ? {} : { bits }), ...(constant === undefined ? {} : { value: constant }),
+      ...(type === 'COMPONENT' ? { componentKey } : {}),
+      ...(type === 'ROM' && words !== undefined ? { words: [...words] } : {}),
+    })),
+    wires: value.wires.map(({ id, source, target, sourceHandle, targetHandle }) => ({ id, source, target, sourceHandle, targetHandle })),
+  });
+  const circuits = (records: Record<number, Circuit>) => Object.fromEntries(Object.entries(records)
+    .map(([id, circuit]) => [id, { levelId: circuit.levelId, revision: circuit.revision, ...graph(circuit) }]));
+  const ports = (records: Port[]) => records.map(({ id, label, bits }) => ({ id, label, bits }));
+  const library = Object.fromEntries(Object.entries(workspace.library).map(([key, definition]) => [key, {
+    id: definition.id, version: definition.version, name: definition.name,
+    inputs: ports(definition.inputs), outputs: ports(definition.outputs), dependencies: [...definition.dependencies],
+    ...(definition.sourceLevel === undefined ? {} : { sourceLevel: definition.sourceLevel }), graph: graph(definition.graph),
+  }]));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: workspace.version, currentLevel: workspace.currentLevel,
+    circuits: circuits(workspace.circuits), proofs: circuits(workspace.proofs), inputs: workspace.inputs, library }));
 }

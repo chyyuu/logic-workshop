@@ -1,5 +1,13 @@
 # Twenty lessons and reusable components
 
+## Computer architecture extension (2026-10-01)
+
+Levels 33–44 add the 8-bit ALU/registers/PC, 16-bit instruction decoding, three execution phases, ROM256×16, RAM256×8, an output port, a datapath and a CPU built from gates. Level 44 exposes Memory alongside PC/IR/Phase/A/B/Z/Out/Halt/Fault to observe paused writes and resets. Shared instruction metadata/oracles live in architectureSpec; 23 reusable gate definitions and the CPU root blocks live in architectureCircuits.
+
+RuntimeState adds isolated memories by flattened path; CircuitNode.words holds ROM only. Workspace v4 reads v1/v2/v3 and fills 44 drafts; ROM is persisted, runtime is excluded. compileGateKernel/compileSequential evaluate actual gate graphs for judge; simulate/replaySequence continue using DigitalJS, with equivalence checks across every delivered temporal scenario. Scenario.program overrides the protected root program ROM; the Worker retains that override for following ticks until reset or a session change. Simulation.activeProgram exists only for a test override.
+
+See docs/computer-architecture-design.md, docs/computer-architecture-plan.md and docs/computer-architecture-acceptance.md. The following ledger records the original 20 lessons and the state/time stage.
+
 ## Contracts
 
 Shared data types live in src/contracts.ts. Levels retain inputs (names) and expected (first numeric output) for compatibility, and add inputPorts, outputPorts and expectedOutputs. Bits are 1, 2, 4 or 8. Component keys are immutable id@version references. The state/time extension adds sequential mode, temporal sequences and DFF d/rst/q ports; grading of sequential lessons uses complete observation sequences rather than the legacy single-capture expected function.

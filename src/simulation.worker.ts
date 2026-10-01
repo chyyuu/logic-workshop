@@ -19,6 +19,7 @@ interface Request {
 let sessionKey: string | undefined;
 let runtime: RuntimeState | undefined;
 let trace: SimulationFrame[] = [];
+let activeProgram: number[] | undefined;
 
 function sameSignals(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   const keys = Object.keys(a);
@@ -45,12 +46,13 @@ function runSession(request: Request): Simulation {
   const circuit = request.circuit;
   if (!circuit) throw new Error('模拟缺少电路。');
   const library = request.library ?? {};
-  const key = request.sessionKey ?? JSON.stringify({ level: circuit.levelId,
+  const key = JSON.stringify({ caller:request.sessionKey,level: circuit.levelId,
     nodes: circuit.nodes.map(({ position: _position, ...node }) => node), wires: circuit.wires, library });
   if (key !== sessionKey || request.operation === 'reset') {
     sessionKey = key;
     runtime = undefined;
     trace = [];
+    activeProgram = undefined;
   }
   if (request.operation === 'replay') {
     const scenario = testSequences(circuit.levelId).find(item => item.id === request.scenarioId);
@@ -58,14 +60,15 @@ function runSession(request: Request): Simulation {
     if (!scenario || !Number.isSafeInteger(stepIndex) || stepIndex! < 0 || stepIndex! >= scenario.steps.length) {
       throw new Error('反例场景或步骤无效。');
     }
-    const simulation = replaySequence(circuit, library, scenario.steps.slice(0, stepIndex! + 1));
+    const simulation = replaySequence(circuit, library, scenario.steps.slice(0, stepIndex! + 1), scenario.program);
+    activeProgram = scenario.program ? [...scenario.program] : undefined;
     runtime = simulation.state;
     trace = simulation.trace?.slice(-64) ?? [];
     return { ...simulation, trace };
   }
   const inputs = request.inputs ?? {};
   const tick = request.operation === 'tick';
-  const simulation = simulate(circuit, inputs, library, { state: runtime, tick });
+  const simulation = simulate(circuit, inputs, library, { state: runtime, tick, program:activeProgram });
   return recordFrame(simulation, circuit, inputs, tick);
 }
 

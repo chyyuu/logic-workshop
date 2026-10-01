@@ -4,7 +4,7 @@ import { hasCombinationalCycle } from './netlist';
 import type { Circuit, CircuitGraph, CircuitNode, ComponentLibrary, GateType, NodeType, Port } from './contracts';
 export type { Circuit, CircuitGraph, CircuitNode, Wire, NodeType } from './contracts';
 
-const gateTypes: GateType[] = ['NAND','NOT','AND','OR','XOR','XNOR','CONST','SPLIT','JOIN','DFF'];
+const gateTypes: GateType[] = ['NAND','NOT','AND','OR','XOR','XNOR','CONST','SPLIT','JOIN','DFF','ROM','RAM'];
 const p = (id: string, bits: number): Port => ({ id, label:id, bits });
 export function getPorts(node: CircuitNode, library: ComponentLibrary = {}): { inputs: Port[]; outputs: Port[] } {
   const bits = node.bits ?? 1;
@@ -16,6 +16,8 @@ export function getPorts(node: CircuitNode, library: ComponentLibrary = {}): { i
   if (node.type === 'INPUT' || node.type === 'CONST') return { inputs:[], outputs:[p('out',bits)] };
   if (node.type === 'OUTPUT') return { inputs:[p('in',bits)], outputs:[] };
   if (node.type === 'DFF') return { inputs:[p('d',bits),p('rst',1)], outputs:[p('q',bits)] };
+  if (node.type === 'ROM') return { inputs:[p('addr',8)], outputs:[p('q',16)] };
+  if (node.type === 'RAM') return { inputs:[p('addr',8),p('d',8),p('we',1),p('rst',1)], outputs:[p('q',8)] };
   if (node.type === 'SPLIT') return { inputs:[p('in',bits)], outputs:Array.from({length:bits},(_,i)=>p(`out${i}`,1)) };
   if (node.type === 'JOIN') return { inputs:Array.from({length:bits},(_,i)=>p(`in${i}`,1)), outputs:[p('out',bits)] };
   return { inputs:node.type === 'NOT' ? [p('a',bits)] : [p('a',bits),p('b',bits)], outputs:[p('out',bits)] };
@@ -29,6 +31,7 @@ export function createCircuit(levelId: number): Circuit {
   return { levelId,revision:0,wires:[],nodes:[
     ...level.inputPorts.map((port,i)=>({id:port.id,label:port.id,type:'INPUT' as const,bits:port.bits,position:{x:90,y:level.inputPorts.length===1?190:90+i*145}})),
     ...level.outputPorts.map((port,i)=>({id:port.id,label:port.id,type:'OUTPUT' as const,bits:port.bits,position:{x:700,y:level.outputPorts.length===1?190:140+i*145}})),
+    ...([38,44].includes(levelId)?[{id:'program',label:'ROM',type:'ROM' as const,bits:16,words:[...(level.defaultProgram??[])],position:{x:380,y:70}}]:[]),
   ] };
 }
 function validateGraph(graph: CircuitGraph, library: ComponentLibrary): string[] {
@@ -43,7 +46,9 @@ function validateGraph(graph: CircuitGraph, library: ComponentLibrary): string[]
     if (!node.position || !Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) errors.push('组件位置无效。');
     if (typeof node.label!=='string' || node.label.length>160) errors.push('组件标签无效。');
     if (!['INPUT','OUTPUT','COMPONENT',...gateTypes].includes(node.type)) errors.push('组件类型无效。');
-    if (![1,2,4,8].includes(node.bits??1)) errors.push('端口位宽无效。');
+    if (![1,2,4,8,16].includes(node.bits??1)) errors.push('端口位宽无效。');
+    if (node.type==='ROM'&&node.bits!==16||node.type==='RAM'&&node.bits!==8) errors.push('存储器位宽无效。');
+    if (node.words!==undefined&&(node.type!=='ROM'||!Array.isArray(node.words)||node.words.length>256||Array.from(node.words).some(w=>!Number.isInteger(w)||w<0||w>65535))) errors.push('ROM 程序字无效。');
     if (node.type === 'CONST' && (!Number.isInteger(node.value??0)||(node.value??0)<0||(node.value??0)>=2**(node.bits??1))) errors.push('常量超出位宽范围。');
     if (node.type === 'COMPONENT' && !Object.hasOwn(library,node.componentKey??'')) errors.push('组件依赖缺失。');
   }
@@ -72,7 +77,7 @@ export function validateLibrary(library: ComponentLibrary): string[] {
     if (typeof def.id!=='string'||!def.id||!Number.isInteger(def.version)||def.version<1||key!==`${def.id}@${def.version}`||typeof def.name!=='string'||!def.name.trim()||def.name.length>60) errors.push('组件版本或名称无效。');
     if (!Array.isArray(def.inputs)||!Array.isArray(def.outputs)||!Array.isArray(def.dependencies)||!def.graph) { errors.push('组件接口无效。');continue; }
     const interfacePorts=[...def.inputs,...def.outputs];
-    if (!def.outputs.length||interfacePorts.length>32||interfacePorts.some(p=>!p||typeof p.id!=='string'||!p.id||p.id.length>160||p.id.includes(':')||typeof p.label!=='string'||![1,2,4,8].includes(p.bits))) { errors.push('组件接口无效。');continue; }
+    if (!def.outputs.length||interfacePorts.length>32||interfacePorts.some(p=>!p||typeof p.id!=='string'||!p.id||p.id.length>160||p.id.includes(':')||typeof p.label!=='string'||![1,2,4,8,16].includes(p.bits))) { errors.push('组件接口无效。');continue; }
     if (new Set(interfacePorts.map(p=>p.id)).size!==interfacePorts.length) errors.push('组件接口无效。');
     const graphErrors=validateGraph(def.graph,library);
     errors.push(...graphErrors);
@@ -134,7 +139,7 @@ export function validateCircuit(circuit: Circuit, library: ComponentLibrary = {}
   return [...new Set(errors)];
 }
 export function addGate(circuit:Circuit,type:GateType,position:CircuitNode['position'],id=createId('g'),library:ComponentLibrary={},bits=1): Circuit {
-  const next={...circuit,revision:circuit.revision+1,nodes:[...circuit.nodes,{id,type,label:type,position,bits}]};
+  const next={...circuit,revision:circuit.revision+1,nodes:[...circuit.nodes,{id,type,label:type,position,bits:type==='ROM'?16:type==='RAM'?8:bits,...(type==='ROM'?{words:[]}: {})}]};
   const error=validateCircuit(next,library)[0];if(error) throw new Error(error);return next;
 }
 export function addComponent(circuit:Circuit,key:string,position:CircuitNode['position'],library:ComponentLibrary,id=createId('c')): Circuit {
@@ -150,6 +155,6 @@ export function canConnect(circuit:Circuit,source:string,sourceHandle:string,tar
   try { connect(circuit,source,sourceHandle,target,targetHandle,library);return true; } catch { return false; }
 }
 export function removeSelection(circuit:Circuit,nodeIds:string[],wireIds:string[]):Circuit {
-  const removable=new Set(circuit.nodes.filter(n=>n.type!=='INPUT'&&n.type!=='OUTPUT'&&nodeIds.includes(n.id)).map(n=>n.id));
+  const removable=new Set(circuit.nodes.filter(n=>n.type!=='INPUT'&&n.type!=='OUTPUT'&&!([38,44].includes(circuit.levelId)&&n.id==='program')&&nodeIds.includes(n.id)).map(n=>n.id));
   return {...circuit,revision:circuit.revision+1,nodes:circuit.nodes.filter(n=>!removable.has(n.id)),wires:circuit.wires.filter(w=>!wireIds.includes(w.id)&&!removable.has(w.source)&&!removable.has(w.target))};
 }

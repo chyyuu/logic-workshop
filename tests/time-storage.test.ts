@@ -8,7 +8,7 @@ import { sequentialReferenceCircuit } from './sequential-fixtures';
 
 afterEach(() => vi.unstubAllGlobals());
 
-it('migrates v2 drafts, inputs, proofs and component versions while adding twelve fresh drafts', () => {
+it('migrates v2 drafts, inputs, proofs and component versions while adding twenty-four fresh drafts', () => {
   const workspace = createWorkspace();
   workspace.circuits[1] = connect(workspace.circuits[1], 'A', 'out', 'Y', 'in');
   workspace.proofs[1] = structuredClone(workspace.circuits[1]);
@@ -24,14 +24,14 @@ it('migrates v2 drafts, inputs, proofs and component versions while adding twelv
     circuits: Object.fromEntries(Object.entries(workspace.circuits).filter(([id]) => Number(id) <= 20)),
     inputs: Object.fromEntries(Object.entries(workspace.inputs).filter(([id]) => Number(id) <= 20)) };
   const restored = parseWorkspace(JSON.stringify(legacy));
-  expect(restored.version).toBe(3);
+  expect(restored.version).toBe(4);
   expect(restored.currentLevel).toBe(2);
   expect(restored.circuits[1]).toEqual(workspace.circuits[1]);
   expect(restored.proofs[1]).toEqual(workspace.proofs[1]);
   expect(restored.inputs[12]).toEqual({ A: 15, B: 9, S: 0 });
   expect(restored.library).toEqual(legacy.library);
   expect(restored.library['outer@1'].dependencies).toEqual(['leaf@1']);
-  expect(Object.keys(restored.circuits)).toHaveLength(32);
+  expect(Object.keys(restored.circuits)).toHaveLength(44);
   expect(restored.circuits[24].wires).toEqual([]);
 });
 

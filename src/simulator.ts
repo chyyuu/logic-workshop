@@ -3,25 +3,37 @@ import { Vector3vl } from '3vl';
 import { getLevel, testInputs, testSequences } from './levels';
 import { getPorts, validateCircuit } from './model';
 import { flattenGraph } from './netlist';
+import { compileCombinational } from './combinationalEvaluator';
+import { compileSequential } from './sequentialEvaluator';
 import type { Endpoint } from './netlist';
 import type { Circuit, CircuitNode, ComponentLibrary, Inputs, RuntimeState, Signal, Simulation, SimulationFrame, SimulationStep, TestResult, TestRow } from './contracts';
 export type { Signal, Simulation, TestResult, TestRow } from './contracts';
 export { hasSequential } from './netlist';
 
 interface Register { key:string; bits:number; q:Endpoint; d:Endpoint; rst:Endpoint; }
+interface Memory { key:string; bits:number; q:Endpoint; addr:Endpoint; words?:number[]; d?:Endpoint; we?:Endpoint; rst?:Endpoint; }
 
-/** DFFs become state sources plus collectors; DigitalJS handles the combinational graph. */
+/** Registers and memories become state sources plus collectors; DigitalJS evaluates the gates. */
 function compile(circuit:Circuit,library:ComponentLibrary) {
-  const flat=flattenGraph(circuit,library),devices:Record<string,Record<string,unknown>>={},connectors:{from:Endpoint;to:Endpoint}[]=[],registers:Register[]=[];
+  const flat=flattenGraph(circuit,library),devices:Record<string,Record<string,unknown>>={},connectors:{from:Endpoint;to:Endpoint}[]=[],registers:Register[]=[],memories:Memory[]=[];
   const nodeMap=new Map(flat.nodes.map(n=>[n.id,n.node]));
   function actual(endpoint:Endpoint):Endpoint[] {
     const node=nodeMap.get(endpoint.id)!;
-    if (node.type==='DFF') return [{id:`${endpoint.id}:${endpoint.port}`,port:endpoint.port==='q'?'out':'in'}];
+    if (['DFF','ROM','RAM'].includes(node.type)) return [{id:`${endpoint.id}:${endpoint.port}`,port:endpoint.port==='q'?'out':'in'}];
     if (node.type==='NOT'&&endpoint.port==='a') return [{id:endpoint.id,port:'in1'},{id:endpoint.id,port:'in2'}];
     return [{id:endpoint.id,port:endpoint.port==='a'?'in1':endpoint.port==='b'?'in2':endpoint.port}];
   }
   for (const {id,node,root} of flat.nodes) {
     const bits=node.bits??1;
+    if (node.type==='ROM'||node.type==='RAM') {
+      const q={id:`${id}:q`,port:'out'},addr={id:`${id}:addr`,port:'in'};
+      devices[q.id]={type:'Input',bits,label:q.id};devices[addr.id]={type:'Output',bits:8,label:addr.id};
+      const memory:Memory={key:id,bits,q,addr,...(node.type==='ROM'?{words:node.words??[]}:{})};
+      if(node.type==='RAM')for(const [port,width] of [['d',8],['we',1],['rst',1]] as const){
+        const endpoint={id:`${id}:${port}`,port:'in'};devices[endpoint.id]={type:'Output',bits:width,label:endpoint.id};memory[port]=endpoint;
+      }
+      memories.push(memory);continue;
+    }
     if (node.type==='DFF') {
       const q={id:`${id}:q`,port:'out'},d={id:`${id}:d`,port:'in'},rst={id:`${id}:rst`,port:'in'};
       devices[q.id]={type:'Input',bits,label:q.id};
@@ -31,7 +43,7 @@ function compile(circuit:Circuit,library:ComponentLibrary) {
       continue;
     }
     const type=node.type==='INPUT'?root?'Input':'Repeater':node.type==='OUTPUT'?root?'Output':'Repeater':
-      ({NAND:'Nand',NOT:'Nand',AND:'And',OR:'Or',XOR:'Xor',XNOR:'Xnor',CONST:'Constant',SPLIT:'BusUngroup',JOIN:'BusGroup'} as const)[node.type as Exclude<CircuitNode['type'],'INPUT'|'OUTPUT'|'COMPONENT'|'DFF'>];
+      ({NAND:'Nand',NOT:'Nand',AND:'And',OR:'Or',XOR:'Xor',XNOR:'Xnor',CONST:'Constant',SPLIT:'BusUngroup',JOIN:'BusGroup'} as const)[node.type as Exclude<CircuitNode['type'],'INPUT'|'OUTPUT'|'COMPONENT'|'DFF'|'ROM'|'RAM'>];
     devices[id]={type,bits,label:id,net:node.label,
       ...(node.type==='CONST'?{constant:(node.value??0).toString(2).padStart(bits,'0')}:{}),
       ...(['SPLIT','JOIN'].includes(node.type)?{groups:Array(bits).fill(1)}:{})};
@@ -42,7 +54,7 @@ function compile(circuit:Circuit,library:ComponentLibrary) {
     inputs:Object.fromEntries(Object.entries(ref.inputs).map(([p,e])=>[p,actual(e)])),
     outputs:Object.fromEntries(Object.entries(ref.outputs).map(([p,e])=>[p,actual(e)[0]]))});
   const engine=new HeadlessCircuit({devices,connectors,subcircuits:{}});
-  return {engine,references,registers};
+  return {engine,references,registers,memories};
 }
 type Session=ReturnType<typeof compile>;
 
@@ -62,7 +74,13 @@ function binary(value:Signal,bits:number):string {
 }
 function initial(session:Session,state?:RuntimeState):RuntimeState {
   if (state&&(!Number.isSafeInteger(state.cycle)||state.cycle<0||!state.registers||typeof state.registers!=='object')) throw new Error('时钟状态无效。');
-  return {cycle:state?.cycle??0,registers:Object.fromEntries(session.registers.map(r=>{
+  const memories=Object.fromEntries(session.memories.filter(m=>m.words===undefined).map(m=>{
+    const data=state?.memories?.[m.key]??Array(256).fill(0);
+    if(!Array.isArray(data)||data.length!==256)throw new Error('存储器状态无效。');
+    for(const value of data)binary(value,8);
+    return [m.key,[...data]];
+  }));
+  return {cycle:state?.cycle??0,...(Object.keys(memories).length?{memories}:{}),registers:Object.fromEntries(session.registers.map(r=>{
     const value=state&&Object.hasOwn(state.registers,r.key)?state.registers[r.key]:0;
     binary(value,r.bits);return [r.key,value];
   }))};
@@ -79,6 +97,33 @@ function read(engine:HeadlessCircuit,endpoint:Endpoint):Signal {
   const kind=endpoint.port==='out'||endpoint.port.startsWith('out')?'outputSignals':'inputSignals';
   return signal(engine.findDeviceByLabel(endpoint.id).get(kind)[endpoint.port]);
 }
+function merge(values:Signal[],bits:number):Signal {
+  let result=binary(values[0],bits);
+  for(const value of values.slice(1)) {
+    const other=binary(value,bits);result=Array.from(result,(bit,i)=>bit===other[i]?bit:'X').join('');
+  }
+  return signal(Vector3vl.fromBin(result.toLowerCase()));
+}
+function addresses(value:Signal):number[] {
+  if(typeof value==='number')return [value];
+  const pattern=binary(value,8);
+  return Array.from({length:256},(_,i)=>i).filter(i=>Array.from(i.toString(2).padStart(8,'0')).every((bit,j)=>pattern[j]==='X'||pattern[j]===bit));
+}
+function memoryRead(session:Session,m:Memory,state:RuntimeState):Signal {
+  const words=m.words??state.memories![m.key];
+  return merge(addresses(read(session.engine,m.addr)).map(addr=>words[addr]??0),m.bits);
+}
+function settleMemories(session:Session,state:RuntimeState) {
+  // A memory output may feed another memory's address through any number of gates.
+  // Re-evaluate addressed reads until both the engine and every memory output agree.
+  for(let round=0;round<=session.memories.length+1;round++) {
+    settle(session.engine);
+    const updates=session.memories.map(m=>({m,value:memoryRead(session,m,state)})).filter(({m,value})=>read(session.engine,m.q)!==value);
+    if(!updates.length)return;
+    for(const {m,value} of updates)session.engine.setInput(m.q.id,Vector3vl.fromBin(binary(value,m.bits).toLowerCase()));
+  }
+  throw new Error('存储器寻址信号未能稳定。');
+}
 function apply(session:Session,circuit:Circuit,inputs:Inputs,state:RuntimeState) {
   for (const node of circuit.nodes.filter(n=>n.type==='INPUT')) {
     const bits=node.bits??1,v=inputs[node.id]??0;
@@ -86,7 +131,7 @@ function apply(session:Session,circuit:Circuit,inputs:Inputs,state:RuntimeState)
     session.engine.setInput(session.references.get(node.id)!.device!,Vector3vl.fromBin(v.toString(2).padStart(bits,'0')));
   }
   for (const r of session.registers) session.engine.setInput(r.q.id,Vector3vl.fromBin(binary(state.registers[r.key],r.bits).toLowerCase()));
-  settle(session.engine);
+  settleMemories(session,state);
 }
 function outputValue(session:Session,node:CircuitNode):Signal {
   return signal(session.engine.getOutput(session.references.get(node.id)!.device!));
@@ -100,7 +145,18 @@ function advance(session:Session,circuit:Circuit,inputs:Inputs,state:RuntimeStat
     const next=rst===1?0:rst===0?d:signal(Vector3vl.fromBin(binary(d,r.bits).replace(/1/g,'X').toLowerCase()));
     return [r.key,next];
   }));
-  const next={registers,cycle:state.cycle+1};
+  const memories=Object.fromEntries(session.memories.filter(m=>m.words===undefined).map(m=>{
+    const old=state.memories![m.key],rst=read(session.engine,m.rst!),we=read(session.engine,m.we!);
+    if(rst===1)return [m.key,Array(256).fill(0)];
+    let data=[...old];
+    if(we!==0) {
+      const candidates=addresses(read(session.engine,m.addr)),d=read(session.engine,m.d!);
+      for(const addr of candidates)data[addr]=we===1&&candidates.length===1?d:merge([old[addr],d],8);
+    }
+    if(rst!==0)data=data.map(value=>merge([value,0],8));
+    return [m.key,data];
+  }));
+  const next={registers,cycle:state.cycle+1,...(Object.keys(memories).length?{memories}:{})};
   apply(session,circuit,inputs,next);
   return next;
 }
@@ -113,22 +169,28 @@ function snapshot(session:Session,circuit:Circuit,library:ComponentLibrary,state
     values[node.id]=node.type==='OUTPUT'?outputValue(session,node):portValues[`${node.id}:${getPorts(node,library).outputs[0]?.id}`]??'X';
   }
   return {values,portValues,wires:Object.fromEntries(circuit.wires.map(w=>[w.id,portValues[`${w.source}:${w.sourceHandle}`]])),
-    state:{cycle:state.cycle,registers:{...state.registers}}};
+    state:{cycle:state.cycle,registers:{...state.registers},...(state.memories?{memories:Object.fromEntries(Object.entries(state.memories).map(([key,words])=>[key,[...words]]))}:{})}};
 }
 function checkedSession(circuit:Circuit,library:ComponentLibrary):Session {
   const error=validateCircuit(circuit,library)[0];if(error)throw new Error(error);
   return compile(circuit,library);
 }
+function withProgram(circuit:Circuit,program?:number[]):Circuit {
+  if(program===undefined||![38,44].includes(circuit.levelId))return circuit;
+  return {...circuit,nodes:circuit.nodes.map(n=>n.id==='program'?{...n,words:[...program]}:n)};
+}
 
-export function simulate(circuit:Circuit,inputs:Inputs,library:ComponentLibrary={},options:{state?:RuntimeState;tick?:boolean}={}):Simulation {
+export function simulate(circuit:Circuit,inputs:Inputs,library:ComponentLibrary={},options:{state?:RuntimeState;tick?:boolean;program?:number[]}={}):Simulation {
+  circuit=withProgram(circuit,options.program);
   const session=checkedSession(circuit,library);
   try {
     const state=advance(session,circuit,inputs,initial(session,options.state),options.tick??false);
-    return snapshot(session,circuit,library,state);
+    return {...snapshot(session,circuit,library,state),...(options.program!==undefined?{activeProgram:[...options.program]}:{})};
   } finally {session.engine.shutdown();}
 }
 
-export function replaySequence(circuit:Circuit,library:ComponentLibrary,steps:SimulationStep[]):Simulation {
+export function replaySequence(circuit:Circuit,library:ComponentLibrary,steps:SimulationStep[],program?:number[]):Simulation {
+  circuit=withProgram(circuit,program);
   const session=checkedSession(circuit,library),trace:SimulationFrame[]=[];
   try {
     let state=initial(session),inputs:Inputs={};
@@ -139,32 +201,37 @@ export function replaySequence(circuit:Circuit,library:ComponentLibrary,steps:Si
         outputs:Object.fromEntries(circuit.nodes.filter(n=>n.type==='OUTPUT').map(n=>[n.id,outputValue(session,n)]))});
       if (trace.length>64) trace.shift();
     }
-    return {...snapshot(session,circuit,library,state),trace};
+    return {...snapshot(session,circuit,library,state),trace,...(program!==undefined?{activeProgram:[...program]}:{})};
   } finally {session.engine.shutdown();}
 }
 
 export function judge(circuit:Circuit,library:ComponentLibrary={}):TestResult {
-  let session:Session|undefined;
   try {
-    session=checkedSession(circuit,library);
-    const current=session,level=getLevel(circuit.levelId),outputNodes=circuit.nodes.filter(n=>n.type==='OUTPUT'),rows:TestRow[]=[];
-    function row(inputs:Inputs,expectedOutputs:Record<string,number>,details:Partial<TestRow>={}) {
-      const actualOutputs=Object.fromEntries(outputNodes.map(n=>[n.id,outputValue(current,n)]));
+    const level=getLevel(circuit.levelId),rows:TestRow[]=[];
+    const error=validateCircuit(circuit,library)[0];if(error)throw new Error(error);
+    const fast=level.mode==='sequential'?undefined:compileCombinational(circuit,library);
+    const clocked=fast?undefined:compileSequential(circuit,library);
+    function row(inputs:Inputs,expectedOutputs:Record<string,number>,actualOutputs:Record<string,Signal>,details:Partial<TestRow>={}) {
       const mismatches=level.outputPorts.filter(p=>actualOutputs[p.id]!==expectedOutputs[p.id]).map(p=>p.id),first=level.outputPorts[0].id;
       rows.push({inputs,expected:expectedOutputs[first],actual:actualOutputs[first],expectedOutputs,actualOutputs,mismatches,passed:!mismatches.length,...details});
     }
     if (level.mode==='sequential') {
       for (const scenario of testSequences(level.id)) {
-        let state=initial(current);
+        let current=clocked!;
+        if(scenario.program!==undefined){
+          const programmed=withProgram(circuit,scenario.program),programError=validateCircuit(programmed,library)[0];
+          if(programError)throw new Error(programError);
+          current=compileSequential(programmed,library);
+        }else current.reset();
         scenario.steps.forEach((step,stepIndex)=>{
-          state=advance(current,circuit,step.inputs,state,step.tick);
-          row(step.inputs,step.expectedOutputs,{scenarioId:scenario.id,scenarioLabel:scenario.label,stepIndex,cycle:state.cycle,tick:step.tick});
+          const actual=current.step(step.inputs,step.tick);
+          row(step.inputs,step.expectedOutputs,actual,{scenarioId:scenario.id,scenarioLabel:scenario.label,stepIndex,cycle:current.cycle,tick:step.tick});
         });
       }
     } else for (const inputs of testInputs(level.id)) {
-      apply(current,circuit,inputs,initial(current));row(inputs,level.expectedOutputs(inputs));
+      if(fast)row(inputs,level.expectedOutputs(inputs),fast(inputs));
+      else{clocked!.reset();row(inputs,level.expectedOutputs(inputs),clocked!.step(inputs,false));}
     }
     return {revision:circuit.revision,passed:rows.length>0&&rows.every(r=>r.passed),rows,failure:rows.find(r=>!r.passed)};
   } catch(e) {return {revision:circuit.revision,passed:false,rows:[],error:(e as Error).message};}
-  finally {session?.engine.shutdown();}
 }

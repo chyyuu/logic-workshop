@@ -9,7 +9,8 @@ import { referenceCircuit } from './fixtures';
 test.setTimeout(120_000);
 const errors = new WeakMap<Page, string[]>();
 function stateAt(id: number): Workspace {
-  const state: Workspace = { version: 3, currentLevel: id, library: {}, proofs: {}, circuits: {},
+  const state: Workspace = { version: 4, currentLevel: id, library: {}, proofs: {},
+    circuits: Object.fromEntries(levels.map(level => [level.id, createCircuit(level.id)])),
     inputs: Object.fromEntries(levels.map(level => [level.id, Object.fromEntries(level.inputs.map(name => [name, 0]))])) };
   for (let level = 1; level <= 32; level++) {
     state.circuits[level] = referenceCircuit(level);
@@ -77,7 +78,7 @@ test('builds a DFF in the editor; inputs hold, ticks capture, movement preserves
   await bit(page, 'D', true); await tick(page, 3); await expect(page.getByTestId('output-Q')).toHaveText('1');
   const exported = await exportState(page); await importState(page, exported);
   await expect(page.getByTestId('clock-cycle')).toContainText('周期 0'); await expect(page.getByTestId('output-Q')).toHaveText('0');
-  expect(exported.version).toBe(3);
+  expect(exported.version).toBe(4);
   await page.screenshot({ path: 'work/time-register-desktop.png' });
 });
 

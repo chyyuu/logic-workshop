@@ -56,6 +56,7 @@ function Workshop() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [panel, setPanel] = useState<'task' | 'selection'>('task');
   const [libraryTab, setLibraryTab] = useState(false);
+  const [paletteTab, setPaletteTab] = useState<'available' | 'teaching'>('available');
   const [busy, setBusy] = useState('');
   const [packageMode, setPackageMode] = useState<'selection' | 'whole' | null>(null);
   const [componentName, setComponentName] = useState('');
@@ -119,6 +120,7 @@ function Workshop() {
   useEffect(() => {
     setObservedStep(null); setTestView('cases'); setProgramId(null); setProgramDirty(false); setMachineVisible(false); setBreakpoints([]);
     setBusBits(getLevel(current).chapter === 6 ? Math.max(8, ...getLevel(current).inputPorts.map(p => p.bits)) : getLevel(current).mode === 'sequential' ? Math.max(...getLevel(current).inputPorts.map(p => p.bits)) : 4);
+    if (getLevel(current).chapter !== 6) setPaletteTab('available');
   }, [current]);
   useEffect(() => { setObservedStep(null); }, [circuit.revision, fitEpoch]);
 
@@ -432,12 +434,13 @@ function Workshop() {
   const selectedNode = circuit.nodes.find(n => selection.nodes.includes(n.id));
   const selectedWire = circuit.wires.find(w => selection.wires.includes(w.id));
   const hasEditableSelection = !programming && circuit.nodes.some(n => selection.nodes.includes(n.id) && n.type !== 'INPUT' && n.type !== 'OUTPUT');
+  const visibleLibraryEntries = Object.entries(workspace.library).filter(([key, definition]) => !teachingLibrary[key] || (definition.sourceLevel ?? 0) < current);
 
   return <div className={`workshop ${temporal ? 'temporal-workshop' : ''} ${programming ? 'programming-workshop' : ''}`}>
     <aside className={`sidebar ${chapterOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><span className="brand-mark"><CircuitBoard size={23} /></span><div><strong>逻辑工坊</strong><span>LOGIC WORKSHOP</span></div>
         <button className="close-sidebar tool-button" aria-label="关闭关卡目录" onClick={() => setChapterOpen(false)}><X size={18} /></button></div>
-      <div className="library-tabs"><button className={!libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(false)}><BookOpen size={14} />关卡</button><button className={libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(true)}><Package size={14} />组件库 <small>{Object.keys(workspace.library).length}</small></button></div>
+      <div className="library-tabs"><button className={!libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(false)}><BookOpen size={14} />关卡</button><button className={libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(true)}><Package size={14} />组件库 <small>{visibleLibraryEntries.length}</small></button></div>
       <div className="sidebar-scroll">
       {!libraryTab ? <nav className="lesson-list" aria-label="关卡">
         {levels.map(item => <button key={item.id} className={`lesson ${item.id === current ? 'current' : ''}`} disabled={item.id > unlocked}
@@ -447,20 +450,21 @@ function Workshop() {
           {item.id === current && <ChevronRight size={15} />}
         </button>)}
       </nav> : <section className="saved-components" aria-label="组件库">
-        {Object.entries(workspace.library).filter(([key, definition]) => !teachingLibrary[key] || (definition.sourceLevel ?? 0) < current).map(([key, definition]) => <div className="library-item" key={key}>
+        {visibleLibraryEntries.map(([key, definition]) => <div className="library-item" key={key}>
           <button className="component" aria-label={`添加组件 ${definition.name} v${definition.version}`} disabled={programming} draggable={!programming} onDragStart={e => e.dataTransfer.setData('application/logic-component', key)} onClick={() => placeComponent(key)}>
             <Package size={23} /><span><strong>{definition.name}</strong><small>v{definition.version} · {definition.inputs.length} 输入 / {definition.outputs.length} 输出</small></span><Plus size={15} /></button>
           <button className="library-inspect" onClick={() => setInspect(definition)}>查看内部电路</button>
         </div>)}
-        {!Object.keys(workspace.library).length && <p className="library-empty">组件库为空</p>}
+        {!visibleLibraryEntries.length && <p className="library-empty">组件库为空</p>}
       </section>}
-      {architecture && <section className="teaching-components" aria-label="教学组件"><div className="sidebar-section-title"><Package size={14} /><span>教学组件</span></div><p>已学模块，可查看内部电路或使用自己的作品。</p>
+      {architecture && <div className="palette-tabs" role="tablist" aria-label="组件区域"><button role="tab" aria-selected={paletteTab === 'available'} className={paletteTab === 'available' ? 'chosen' : ''} onClick={() => setPaletteTab('available')}><Cable size={14} />基础组件</button><button role="tab" aria-selected={paletteTab === 'teaching'} className={paletteTab === 'teaching' ? 'chosen' : ''} onClick={() => setPaletteTab('teaching')}><Package size={14} />教学组件</button></div>}
+      {architecture && paletteTab === 'teaching' && <section className="teaching-components palette-panel" aria-label="教学组件"><p>已学模块，可查看内部电路或使用自己的作品。</p>
         {Object.entries(teachingLibrary).filter(([, definition]) => (definition.sourceLevel ?? 0) < current).map(([key, definition]) => <div className="library-item" key={key}>
           <button className="component" aria-label={`添加教学组件 ${definition.name}`} draggable onDragStart={e => e.dataTransfer.setData('application/logic-component', key)} onClick={() => placeComponent(key)}><Package size={23} /><span><strong>{definition.name}</strong><small>{definition.inputs.length} 输入 / {definition.outputs.length} 输出</small></span><Plus size={15} /></button>
           <button className="library-inspect" aria-label={`查看教学组件 ${definition.name}`} onClick={() => setInspect(definition)}>查看内部电路</button>
         </div>)}
       </section>}
-      {!programming && <div className="components-section"><div className="sidebar-section-title"><Cable size={14} /><span>可用组件</span><span className="component-count">{level.allowed.length}</span></div>
+      {!programming && (!architecture || paletteTab === 'available') && <div className="components-section palette-panel">{!architecture && <div className="sidebar-section-title"><Cable size={14} /><span>可用组件</span><span className="component-count">{level.allowed.length}</span></div>}
         {level.allowed.includes('SPLIT') && <label className="bus-size">元件位宽<select aria-label="总线位宽" value={busBits} onChange={e => setBusBits(Number(e.target.value))}>{level.allowed.includes('CONST') && <option value="1">1 bit</option>}<option value="2">2 bit</option><option value="4">4 bit</option>{(temporal || architecture) && <option value="8">8 bit</option>}{architecture && <option value="16">16 bit</option>}</select></label>}
         {level.allowed.length === 0 ? <div className="wire-component"><Cable size={26} /><div><strong>导线</strong><span>1 bit</span></div></div> : level.allowed.map(type =>
           <button className="component" key={type} aria-label={`添加 ${type}`} draggable onDragStart={e => { e.dataTransfer.setData('application/logic-gate', type); e.dataTransfer.effectAllowed = 'copy'; }} onClick={() => add(type)}>

@@ -55,9 +55,11 @@ test('a migrated stage-five save unlocks architecture and lets users place 16-bi
   await expect(page.getByTestId('progress-count')).toHaveText('32 / 56');
   await page.getByRole('button', { name: /第 33 关/ }).click();
   await expect(page.getByRole('heading', { name: '八位加减器', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: '基础组件', exact: true }).click();
   await page.getByRole('combobox', { name: '总线位宽' }).selectOption('16');
   await page.getByRole('button', { name: '添加 AND', exact: true }).click();
   await expect(page.locator('.gate-node .node-kind')).toContainText(['16 bit']);
+  await page.getByRole('tab', { name: '教学组件', exact: true }).click();
   await page.getByRole('button', { name: '查看教学组件 八位进位加法器', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '组件内部电路' })).toBeVisible();
   await expect(page.locator('.component-preview .gate-node')).not.toHaveCount(0);

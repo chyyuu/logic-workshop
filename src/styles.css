@@ -296,6 +296,10 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .library-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1; padding: 8px 4px; border-bottom: 2px solid transparent; font-size: 11px; color: #8b969d; }
 .library-tabs button.chosen { color: #26735b; border-color: #34846b; }
 .library-tabs small { font: 10px ui-monospace, Consolas, monospace; }
+.palette-tabs { display: flex; gap: 7px; padding: 12px 15px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.palette-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1; padding: 8px 4px; border-bottom: 2px solid transparent; font-size: 11px; color: #8b969d; }
+.palette-tabs button.chosen { color: #26735b; border-color: #34846b; }
+.palette-panel { flex: 1; min-height: 0; max-height: none; flex-shrink: 1; }
 .sidebar-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sidebar-progress { flex-shrink: 0; padding: 14px 23px 15px; }
 .sidebar-footer { flex-shrink: 0; min-height: 41px; padding-top: 11px; padding-bottom: 11px; }
@@ -336,6 +340,7 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .component-dialog>footer { padding: 10px 20px; font-size: 11px; color: #8a9a91; overflow-wrap: anywhere; }
 .test-feedback .secondary-button { margin-top: 12px; }
 .teaching-components { padding: 15px 13px 0; overflow-y: auto; max-height: 28vh; flex-shrink: 0; }
+.teaching-components.palette-panel { max-height: none; }
 .teaching-components .sidebar-section-title { padding: 0 10px; }
 .teaching-components>p { color: #82938d; font-size: 10px; padding: 7px 10px 10px; }
 .teaching-components .library-item { margin-bottom: 9px; }

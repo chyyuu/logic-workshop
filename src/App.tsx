@@ -12,6 +12,7 @@ import { createId } from './id';
 import { loadWorkspace, saveWorkspace, type Workspace } from './storage';
 import { CircuitNodeView, GateSymbol, nodeDimensions, type FlowNode } from './CircuitNode';
 import { WireEdge, type FlowEdge } from './WireEdge';
+import { ComponentPreview } from './ComponentPreview';
 import { TimingWaveform } from './TimingWaveform';
 import { ArchitecturePanel, ProgramEditor } from './ArchitecturePanel';
 import { architectureLibrary } from './architectureCircuits';
@@ -41,7 +42,7 @@ function Workshop() {
   const temporal = level.mode === 'sequential' || programming;
   const architecture = level.chapter === 6;
   const teachingLibrary = useMemo(architectureLibrary, []);
-  const inspectionLibrary = { ...teachingLibrary, ...workspace.library };
+  const inspectionLibrary = useMemo(() => ({ ...teachingLibrary, ...workspace.library }), [teachingLibrary, workspace.library]);
   const inputs = workspace.inputs[current];
   const [history, setHistory] = useState<Record<number, { past: Circuit[]; future: Circuit[] }>>({});
   const [result, setResult] = useState<TestResult | null>(null);
@@ -612,7 +613,7 @@ function Workshop() {
     {toast && <div className="toast" role="status"><CircleAlert size={16} /><span>{toast}</span><button aria-label="关闭通知" onClick={() => setToast('')}><X size={14} /></button></div>}
     {packageMode && <div className="modal-backdrop" onClick={() => setPackageMode(null)}><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="package-title" onClick={e => e.stopPropagation()}><Package size={24} /><h2 id="package-title">{packageMode === 'whole' ? '保存电路为组件' : '封装所选组件'}</h2><label className="property-input">组件名称<input autoFocus aria-label="组件名称" maxLength={60} value={componentName} onChange={e => setComponentName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveComponent(); if (e.key === 'Escape') setPackageMode(null); }} /></label><div><button className="secondary-button" onClick={() => setPackageMode(null)}>取消</button><button className="test-button" onClick={saveComponent}>保存组件</button></div></section></div>}
     {inspect && <div className="modal-backdrop" onClick={() => setInspect(null)}><section className="component-dialog" role="dialog" aria-modal="true" aria-label="组件内部电路" onClick={e => e.stopPropagation()}><header><h2>{inspect.name} <small>v{inspect.version}</small></h2><ToolButton label="关闭组件详情" onClick={() => setInspect(null)}><X size={18} /></ToolButton></header><div className="component-interfaces"><span>输入 {inspect.inputs.map(p => `${p.label}:${p.bits}`).join(' · ')}</span><span>输出 {inspect.outputs.map(p => `${p.label}:${p.bits}`).join(' · ')}</span></div>
-      <div className="component-preview"><ReactFlowProvider><ReactFlow<FlowNode, FlowEdge> nodes={inspect.graph.nodes.map(n => ({ id: n.id, type: 'circuit', position: n.position, measured: nodeDimensions(n.type, getPorts(n, inspectionLibrary)), data: { kind: n.type, label: n.label, bits: n.bits ?? 1, ports: getPorts(n, inspectionLibrary), value: 'X', inputValues: {}, portValues: {}, pending: null, failed: false, readOnly: true, onToggle: () => {}, onValue: () => {}, onPort: () => {} } }))} edges={inspect.graph.wires.map(w => ({ ...w, type: 'wire', data: { value: 'X', failed: false } }))} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} fitView minZoom={0.04}><Background gap={20} /></ReactFlow></ReactFlowProvider></div>
+      <div className="component-preview"><ComponentPreview definition={inspect} library={inspectionLibrary} /></div>
       <footer>{inspect.dependencies.length ? <span>依赖 {inspect.dependencies.map(key => inspectionLibrary[key]?.name ?? key).join(' · ')}</span> : <span>{inspect.graph.nodes.filter(n => n.type !== 'INPUT' && n.type !== 'OUTPUT').length} 个元件</span>}</footer></section></div>}
     {programId && circuit.nodes.find(n => n.id === programId && n.type === 'ROM') && <ProgramEditor key={`${current}:${programId}`} node={circuit.nodes.find(n => n.id === programId)!} activeProgram={programId === 'program' ? simulation.activeProgram : undefined} pc={simulation.values.PC} onClose={() => setProgramId(null)} onSave={words => { commit({ ...circuit, revision: circuit.revision + 1, nodes: circuit.nodes.map(n => { if (n.id !== programId) return n; const { programSource: _source, ...node } = n; return { ...node, words }; }) }); setProgramId(null); notify('ROM 程序已应用，运行状态已清零。'); }} />}
     {resetOpen && <div className="modal-backdrop" onClick={() => setResetOpen(false)}><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title" onClick={e => e.stopPropagation()}>

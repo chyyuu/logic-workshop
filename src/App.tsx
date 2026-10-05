@@ -27,7 +27,7 @@ const clone = <T,>(value: T): T => structuredClone(value);
 function ToolButton({ label, children, onClick, disabled = false, active = false }: {
   label: string; children: ReactNode; onClick: () => void; disabled?: boolean; active?: boolean;
 }) {
-  return <button className={`tool-button ${active ? 'active' : ''}`} aria-label={label} title={label} onClick={onClick} disabled={disabled}>{children}</button>;
+  return <button className={`tool-button ${active ? 'active' : ''}`} aria-label={label} data-tooltip={label} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 
 function Workshop() {
@@ -498,7 +498,7 @@ function Workshop() {
           <ToolButton label={temporal ? '单步周期' : '下一组输入'} disabled={temporal && (simulation.pending || !!busy)} onClick={() => { setPlaying(false); step(); }}><StepForward size={18} /></ToolButton>
           {temporal && <ToolButton label="清零状态" disabled={simulation.pending || !!busy} onClick={() => { setPlaying(false); setObservedStep(null); simulation.reset(); }}><RotateCcw size={16} /></ToolButton>}
           {busy ? <button className="test-button" aria-label="取消后台任务" onClick={cancelTask}><X size={16} /><span>{busy}</span></button> : <button className="test-button" aria-label={programming ? '测试程序' : '测试电路'} disabled={programming && programDirty} onClick={() => void runTest()}><CircleCheck size={16} /><span>{programming ? '测试程序' : '测试电路'}</span></button>}
-          <button className="task-toggle tool-button" aria-label="查看任务" title="查看任务" onClick={() => setTaskOpen(true)}><SlidersHorizontal size={18} /></button>
+          <button className="task-toggle tool-button" aria-label="查看任务" data-tooltip="查看任务" onClick={() => setTaskOpen(true)}><SlidersHorizontal size={18} /></button>
         </div>
       </div>
 

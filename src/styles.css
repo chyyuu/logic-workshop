@@ -61,9 +61,18 @@ svg { flex-shrink: 0; }
 .save-error { color: #be6441; }
 .save-error>span { background: #be6441; }
 .file-tools { display: flex; align-items: center; gap: 2px; border-left: 1px solid var(--border); padding-left: 13px; }
-.tool-button { width: 32px; height: 32px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: #708087; flex-shrink: 0; padding: 0; }
+.tool-button { width: 32px; height: 32px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: #708087; flex-shrink: 0; padding: 0; position: relative; }
 .tool-button:hover:not(:disabled) { background: #edf1ef; color: #246c57; }
 .tool-button.active { background: #e7f2eb; color: #18846f; }
+.tool-button[data-tooltip]::after {
+  content: attr(data-tooltip); position: absolute; z-index: 1000; left: 50%; bottom: calc(100% + 8px); max-width: min(240px, 45vw);
+  padding: 5px 8px; border-radius: 4px; background: #263b35; color: #fff; box-shadow: 0 3px 10px #2235302b;
+  font-size: 10px; font-weight: 400; line-height: 1.35; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden;
+  transform: translate(-50%, 4px); transition: opacity .12s ease, transform .12s ease, visibility .12s;
+}
+.tool-button[data-tooltip]:hover::after, .tool-button[data-tooltip]:focus-visible::after { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+.file-tools .tool-button[data-tooltip]::after { top: calc(100% + 8px); bottom: auto; transform: translate(-50%, -4px); }
+.file-tools .tool-button[data-tooltip]:hover::after, .file-tools .tool-button[data-tooltip]:focus-visible::after { transform: translate(-50%, 0); }
 .editor-toolbar { min-height: 57px; flex-shrink: 0; padding: 0 19px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); background: #fff; }
 .toolbar-title { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; margin-right: auto; white-space: nowrap; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #4c8e74; }
@@ -113,9 +122,19 @@ svg { flex-shrink: 0; }
 .gate-symbol.small { width: 43px; height: 40px; }
 .gate-symbol path, .gate-symbol circle { fill: none; stroke: currentColor; stroke-width: 2.8; stroke-linejoin: round; }
 .node-signal { font-size: 13px; color: var(--signal-color); font-family: ui-monospace, Consolas, monospace; font-weight: 600; margin-left: auto; }
-.react-flow__handle.port { width: 14px; height: 14px; border: 3px solid #fff; border-radius: 50%; background: var(--signal-color); box-shadow: 0 0 0 1px var(--signal-color); }
+.react-flow__handle.port { width: 14px; height: 14px; border: 3px solid #fff; border-radius: 50%; background: var(--signal-color); box-shadow: 0 0 0 1px var(--signal-color); z-index: 2; pointer-events: all; }
 .react-flow__handle.port::before { content: ''; position: absolute; inset: -10px; border-radius: 50%; }
 .react-flow__handle.port:hover, .react-flow__handle.port.pending { box-shadow: 0 0 0 1px var(--signal-color), 0 0 0 6px #18846f25; }
+.react-flow__handle.port[data-tooltip]::after {
+  content: attr(data-tooltip); position: absolute; z-index: 1000; top: 50%; width: max-content; max-width: min(260px, 42vw); padding: 5px 8px; border: 1px solid #d9e4de;
+  border-radius: 4px; background: #fff; color: #36574a; box-shadow: 0 3px 10px #22353026; font: 10px/1.4 ui-monospace, Consolas, monospace;
+  white-space: normal; overflow-wrap: anywhere; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .12s ease, transform .12s ease, visibility .12s;
+}
+.react-flow__handle.port-input[data-tooltip]::after { right: calc(100% + 9px); text-align: right; transform: translate(4px, -50%); }
+.react-flow__handle.port-output[data-tooltip]::after { left: calc(100% + 9px); text-align: left; transform: translate(-4px, -50%); }
+.react-flow__handle.port[data-tooltip]:hover::after, .react-flow__handle.port[data-tooltip]:focus-visible::after { opacity: 1; visibility: visible; }
+.react-flow__handle.port-input[data-tooltip]:hover::after, .react-flow__handle.port-input[data-tooltip]:focus-visible::after { transform: translate(0, -50%); }
+.react-flow__handle.port-output[data-tooltip]:hover::after, .react-flow__handle.port-output[data-tooltip]:focus-visible::after { transform: translate(0, -50%); }
 .react-flow__handle.connectingto { background: #18846f; box-shadow: 0 0 0 6px #18846f30; }
 .failed-node { border-color: #d78b82; box-shadow: 0 0 0 2px #ce4b471a; }
 .wire-value { position: absolute; min-width: 19px; height: 19px; padding: 0 3px; display: grid; place-items: center; background: #f5f7f8; font-family: ui-monospace, Consolas, monospace; font-size: 10px; border-radius: 3px; border: 1px solid #dce4e7; pointer-events: none; }
@@ -178,7 +197,7 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .goal-section { margin-top: 25px; }
 .task-panel h3 { font-size: 10px; color: #75868c; font-weight: 600; margin-bottom: 11px; }
 .goal-section p { font-size: 12px; line-height: 1.9; color: #485b62; }
-.formula { margin-top: 12px; height: 46px; display: flex; align-items: center; justify-content: center; background: #f4f7f6; border: 1px solid #e6ece8; border-radius: 5px; font-size: 15px; color: #517365; font-family: ui-monospace, Consolas, monospace; }
+.formula { margin-top: 12px; min-height: 46px; width: 100%; display: flex; align-items: center; justify-content: center; padding: 8px 10px; background: #f4f7f6; border: 1px solid #e6ece8; border-radius: 5px; font-size: 15px; line-height: 1.5; color: #517365; font-family: ui-monospace, Consolas, monospace; text-align: center; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .interface-section { margin-top: 25px; }
 .interface-section>div { display: flex; gap: 12px; align-items: center; height: 32px; font-size: 10px; border-bottom: 1px solid #f0f3f4; }
 .interface-section>div>span { color: #9aa7ae; width: 30px; }

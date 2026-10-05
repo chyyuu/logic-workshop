@@ -73,6 +73,16 @@ test('a migrated stage-five save unlocks architecture and lets users place 16-bi
   expect((await exported(page)).circuits[33].nodes.filter(n => n.type === 'COMPONENT')).toHaveLength(0);
 });
 
+test('refreshes reused A and B handles when entering the register-pair lesson', async ({ page }) => {
+  const state = stateAt(35);
+  state.currentLevel = 34;
+  await load(page, state);
+  await page.getByRole('button', { name: /第 35 关/ }).click();
+  await expect(page.getByRole('heading', { name: '双寄存器组', exact: true })).toBeVisible();
+  await expect(page.locator('.react-flow__edge[aria-label="Edge from reference to A"]')).toHaveCount(1);
+  await expect(page.locator('.react-flow__edge[aria-label="Edge from reference to B"]')).toHaveCount(1);
+});
+
 test('ROM editing validates, commits atomically, undoes fully and retains instruction words through import', async ({ page }) => {
   const state = stateAt(38);
   await load(page, state);

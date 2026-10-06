@@ -182,6 +182,7 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .table-status { display: flex; justify-content: center; align-items: center; gap: 5px; font-size: 10px; font-family: "Microsoft YaHei", sans-serif; }
 .table-status.pass { color: #3e8d6c; }.table-status.fail { color: #bf5b40; }
 .unknown-cell { color: #b9893e !important; }
+.mismatch-cell { color: #c4674b !important; font-weight: 600; }
 .untested { color: #b3bcc1; font-size: 10px; font-family: "Microsoft YaHei", sans-serif; }
 .test-panel-footer { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; color: #9aa6ad; font-size: 10px; }
 .test-panel-footer>span:first-child { display: flex; align-items: center; gap: 6px; }
@@ -193,11 +194,11 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .task-eyebrow { display: flex; align-items: center; gap: 10px; color: #9aa5ab; font-size: 10px; }
 .task-eyebrow span { margin-left: auto; color: #65917c; background: #f0f7f2; padding: 2px 6px; border-radius: 3px; font-size: 9px; }
 .task-panel h1 { font-size: 22px; line-height: 1.4; font-weight: 650; margin: 12px 0 13px; }
-.task-story { font-size: 11px; line-height: 1.9; color: #859299; }
 .goal-section { margin-top: 25px; }
 .task-panel h3 { font-size: 10px; color: #75868c; font-weight: 600; margin-bottom: 11px; }
 .goal-section p { font-size: 12px; line-height: 1.9; color: #485b62; }
-.formula { margin-top: 12px; min-height: 46px; width: 100%; display: flex; align-items: center; justify-content: center; padding: 8px 10px; background: #f4f7f6; border: 1px solid #e6ece8; border-radius: 5px; font-size: 15px; line-height: 1.5; color: #517365; font-family: ui-monospace, Consolas, monospace; text-align: center; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.formula { margin-top: 12px; min-height: 46px; width: 100%; display: flex; align-items: center; justify-content: flex-start; padding: 8px 10px; background: #f4f7f6; border: 1px solid #e6ece8; border-radius: 5px; font-size: 15px; line-height: 1.5; color: #517365; font-family: ui-monospace, Consolas, monospace; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.instruction-spec-button { margin-top: 10px; width: 100%; }
 .interface-section { margin-top: 25px; }
 .interface-section>div { display: flex; gap: 12px; align-items: center; height: 32px; font-size: 10px; border-bottom: 1px solid #f0f3f4; }
 .interface-section>div>span { color: #9aa7ae; width: 30px; }
@@ -357,7 +358,20 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .component-interfaces { display: flex; flex-wrap: wrap; gap: 15px; padding: 10px 20px; font: 11px ui-monospace, Consolas, monospace; color: #688479; }
 .component-preview { flex: 1; min-height: 0; background: #f5f7f8; }
 .component-preview-loading { height: 100%; display: grid; place-items: center; color: #84938c; font-size: 11px; }
+.machine-preview { position: absolute; inset: 0; background: #f5f7f8; }
+.machine-preview>.react-flow { width: 100%; height: 100%; }
 .component-dialog>footer { padding: 10px 20px; font-size: 11px; color: #8a9a91; overflow-wrap: anywhere; }
+.instruction-dialog { width: min(850px, calc(100vw - 40px)); max-height: min(720px, calc(100dvh - 40px)); background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 60px #25362b30; }
+.instruction-dialog>header { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.instruction-dialog h2 { font-size: 17px; color: #2c4239; }
+.instruction-dialog h2 small { margin-left: 8px; font-size: 11px; color: #89978f; font-weight: 400; }
+.instruction-dialog-body { padding: 18px 20px 20px; overflow: auto; }
+.instruction-dialog-body>p { margin: 0 0 16px; color: #596e65; font-size: 12px; line-height: 1.8; }
+.instruction-dialog-body table { table-layout: auto; }
+.instruction-dialog-body th, .instruction-dialog-body td { padding: 9px 8px; text-align: left; border-bottom: 1px solid #edf1ef; vertical-align: top; }
+.instruction-dialog-body th { color: #75868c; font-size: 10px; font-weight: 600; }
+.instruction-dialog-body td { color: #485b62; font-size: 11px; line-height: 1.5; }
+.instruction-spec-note { margin-top: 15px !important; color: #819087 !important; }
 .test-feedback .secondary-button { margin-top: 12px; }
 .teaching-components { padding: 15px 13px 0; overflow-y: auto; max-height: 28vh; flex-shrink: 0; }
 .teaching-components.palette-panel { max-height: none; }
@@ -461,12 +475,14 @@ td button { display: flex; gap: 4px; align-items: center; justify-content: cente
 .program-cases-footer { padding: 9px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #93a196; font-size: 9px; }
 .assembly-help { color: #7c9081; font-size: 10px; line-height: 1.7; margin-top: 13px; }
 .assembly-help summary { cursor: pointer; color: #568467; }
+.assembly-help pre { margin: 0; padding: 11px 13px; overflow-x: auto; color: #45695a; background: #f2f8f3; font: 10px/1.8 ui-monospace, Consolas, monospace; white-space: pre; }
 .assembly-help p { margin-top: 8px; }
 .program-failure-detail { display: flex; align-items: flex-start; gap: 8px; padding: 10px; margin-top: 12px; border-radius: 4px; font-size: 10px; color: #a25d43; background: #fff0e9; }
 .programming-workshop .editor-toolbar .edit-tools .tool-divider, .programming-workshop .editor-toolbar .edit-tools button:disabled { display: none; }
 .programming-workshop .board:not(.programming-machine-hidden) { min-height: 330px; flex: none; }
 .programming-workshop .board-area:has(.board:not(.programming-machine-hidden)) { overflow-y: auto; }
 .programming-workshop .board-area:has(.board:not(.programming-machine-hidden)) .programming-workbench { flex: none; overflow: visible; }
+.programming-workshop .board-area.machine-first .board { order: -1; }
 @media (max-width: 1250px) {
   .programming-heading span { display: none; }
   .programming-workbench { padding: 14px; }

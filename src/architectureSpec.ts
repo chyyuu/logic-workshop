@@ -2,6 +2,19 @@ import type { Inputs, Outputs } from './contracts';
 
 const instructionNames = ['NOP', 'MOVI', 'ADD', 'SUB', 'LOAD', 'STORE', 'JMP', 'JZ', 'OUT', 'HLT'];
 
+export const instructionSet = [
+  { opcode: 0, name: 'NOP', param: '必须为 0', immediate: '必须为 0', effect: '不执行操作' },
+  { opcode: 1, name: 'MOVI', param: '0=A，1=B', immediate: '8 位立即数', effect: '将立即数写入 A 或 B' },
+  { opcode: 2, name: 'ADD', param: '必须为 0', immediate: '必须为 0', effect: 'A ← A + B' },
+  { opcode: 3, name: 'SUB', param: '必须为 0', immediate: '必须为 0', effect: 'A ← A - B' },
+  { opcode: 4, name: 'LOAD', param: '必须为 0', immediate: '8 位地址', effect: 'A ← RAM[地址]' },
+  { opcode: 5, name: 'STORE', param: '必须为 0', immediate: '8 位地址', effect: 'RAM[地址] ← A' },
+  { opcode: 6, name: 'JMP', param: '必须为 0', immediate: '8 位地址', effect: 'PC ← 地址' },
+  { opcode: 7, name: 'JZ', param: '必须为 0', immediate: '8 位地址', effect: 'Z=1 时 PC ← 地址' },
+  { opcode: 8, name: 'OUT', param: '必须为 0', immediate: '必须为 0', effect: 'Out ← A' },
+  { opcode: 9, name: 'HLT', param: '必须为 0', immediate: '必须为 0', effect: '停机' },
+] as const;
+
 export function encodeInstruction(op: number, param = 0, imm = 0): number {
   return ((op & 15) << 12) | ((param & 15) << 8) | (imm & 255);
 }

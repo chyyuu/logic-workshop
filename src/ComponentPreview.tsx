@@ -1,15 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BaseEdge, Background, EdgeLabelRenderer, getSmoothStepPath, ReactFlow, ReactFlowProvider, type Edge, type EdgeProps } from '@xyflow/react';
 import type { ElkEdgeSection, ElkNode, ElkPoint } from 'elkjs/lib/elk-api';
-import type { ComponentDefinition, ComponentLibrary } from './contracts';
+import type { CircuitGraph, ComponentDefinition, ComponentLibrary, Signal } from './contracts';
 import { getPorts } from './model';
 import { CircuitNodeView, nodeDimensions, portTop, type FlowNode } from './CircuitNode';
 
 const nodeTypes = { circuit: CircuitNodeView };
 const edgeTypes = { 'preview-wire': PreviewWireEdge };
 
-type PreviewEdgeData = { value: 'X'; failed: false; bits?: number; route?: ElkPoint[] };
+type PreviewEdgeData = { value: Signal; failed: false; bits?: number; route?: ElkPoint[] };
 type PreviewEdge = Edge<PreviewEdgeData, 'preview-wire'>;
+
+export interface PreviewSignals {
+  values: Record<string, Signal>;
+  portValues: Record<string, Signal>;
+  wires: Record<string, Signal>;
+}
 
 function routePoints(sections: ElkEdgeSection[] | undefined) {
   if (!sections?.length) return undefined;
@@ -71,6 +77,29 @@ function flowGraph(definition: ComponentDefinition, library: ComponentLibrary,
   return { nodes, edges };
 }
 
+function applySignals(graph: { nodes: FlowNode[]; edges: PreviewEdge[] }, definition: ComponentDefinition,
+  library: ComponentLibrary, signals?: PreviewSignals) {
+  if (!signals) return graph;
+  const inputValues = new Map<string, Record<string, Signal>>();
+  for (const wire of definition.graph.wires) {
+    const values = inputValues.get(wire.target) ?? {};
+    values[wire.targetHandle] = signals.wires[wire.id] ?? 'X';
+    inputValues.set(wire.target, values);
+  }
+  const nodes = graph.nodes.map(node => {
+    const source = definition.graph.nodes.find(candidate => candidate.id === node.id);
+    if (!source) return node;
+    const ports = getPorts(source, library);
+    return { ...node, data: { ...node.data,
+      value: signals.values[node.id] ?? 'X',
+      inputValues: inputValues.get(node.id) ?? {},
+      portValues: Object.fromEntries(ports.outputs.map(port => [port.id, signals.portValues[`${node.id}:${port.id}`] ?? (source.type === 'INPUT' ? signals.values[node.id] ?? 'X' : 'X')])),
+    } };
+  });
+  const edges = graph.edges.map(edge => ({ ...edge, data: { value: signals.wires[edge.id] ?? 'X', failed: false as const, bits: edge.data?.bits, route: edge.data?.route } }));
+  return { nodes, edges };
+}
+
 async function layoutGraph(definition: ComponentDefinition, library: ComponentLibrary) {
   const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
   const elk = new ELK();
@@ -109,7 +138,7 @@ async function layoutGraph(definition: ComponentDefinition, library: ComponentLi
   return flowGraph(definition, library, positions, routes);
 }
 
-export function ComponentPreview({ definition, library }: { definition: ComponentDefinition; library: ComponentLibrary }) {
+export function ComponentPreview({ definition, library, signals, provider = true }: { definition: ComponentDefinition; library: ComponentLibrary; signals?: PreviewSignals; provider?: boolean }) {
   const [graph, setGraph] = useState<{ nodes: FlowNode[]; edges: PreviewEdge[] } | null>(null);
   useEffect(() => {
     let current = true;
@@ -119,8 +148,15 @@ export function ComponentPreview({ definition, library }: { definition: Componen
     return () => { current = false; };
   }, [definition, library]);
   if (!graph) return <div className="component-preview-loading">正在载入内部电路...</div>;
-  return <ReactFlowProvider><ReactFlow<FlowNode, PreviewEdge> nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+  const displayedGraph = applySignals(graph, definition, library, signals);
+  const preview = <ReactFlow<FlowNode, PreviewEdge> nodes={displayedGraph.nodes} edges={displayedGraph.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
     nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} fitView minZoom={0.04}>
     <Background gap={20} />
-  </ReactFlow></ReactFlowProvider>;
+  </ReactFlow>;
+  return provider ? <ReactFlowProvider>{preview}</ReactFlowProvider> : preview;
+}
+
+export function CircuitPreview({ graph, library, signals }: { graph: CircuitGraph; library: ComponentLibrary; signals: PreviewSignals }) {
+  const definition = useMemo<ComponentDefinition>(() => ({ id: 'circuit-preview', version: 1, name: '电路预览', inputs: [], outputs: [], graph, dependencies: [] }), [graph]);
+  return <ComponentPreview definition={definition} library={library} signals={signals} provider={false} />;
 }

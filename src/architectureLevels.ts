@@ -63,10 +63,10 @@ export const architectureLevels: Level[] = [
   lesson(39, '三阶段时序', '取指、译码、执行', '使能沿上 Phase 按 0→1→2→0 循环。Stop 或 E=0 保持；R 优先清零；Phase=2 时 Execute=1。',
     '沿上 Phase←R?0:(E∧¬Stop)?(Phase+1) mod 3:Phase', [['E', 1], ['Stop', 1], ['R', 1]], [['Phase', 2], ['Execute', 1]],
     ['两位状态足够表示三个阶段，状态3不参与正常循环。', '从当前阶段译码出下一阶段。', 'E 与 NOT(Stop) 控制寄存器写入；Execute 直接检测 Phase 等于2。'], 'ThreePhaseClock'),
-  lesson(40, '指令控制器', '把指令变成控制信号', '只有合法指令在 Phase=2 时产生控制信号。Invalid 在所有阶段指示非法编码；JZ 只有 Z=1 才跳转。',
+  lesson(40, '指令控制器', '把指令变成控制信号', '根据当前指令 Instruction、零标志 Z 和阶段 Phase 生成控制信号。Phase=0、1、2 分别表示取指、译码、执行，合法指令只有在 Phase=2 时产生对应控制信号。WA/WB 分别是寄存器 A/B 写使能；ALUOp 选择 ALU 运算（00 加法、01 减法）；MemWrite/MemRead 分别是 RAM 写入和读取使能；Jump 是 PC 跳转使能；OutWrite 是输出寄存器写使能；Halt 是停机信号；Invalid 表示指令编码非法且不受 Phase 影响。JZ 还需要 Z=1。',
     '执行控制=Valid∧(Phase=2)∧指令译码', [['Instruction', 16], ['Z', 1], ['Phase', 2]],
     [['WA', 1], ['WB', 1], ['ALUOp', 2], ['MemWrite', 1], ['MemRead', 1], ['Jump', 1], ['OutWrite', 1], ['Halt', 1], ['Invalid', 1]],
-    ['先复用指令格式校验，再检测执行阶段。', 'MOVI 根据 Param 写 A 或 B；ADD/SUB/LOAD 写 A，SUB 令 ALUOp=1。', 'STORE/LOAD/JMP/JZ/OUT/HLT 各自控制对应通路；其他时候 ALUOp=0，非法编码关闭全部执行控制。'], 'InstructionController', instructionControl, controllerCases),
+    ['先复用指令格式校验，再检测执行阶段。', '合法指令在 Phase=2 时才打开对应控制信号：MOVI 根据 Param 决定写 A 或 B；ADD/SUB/LOAD 都会写 A；LOAD/STORE 分别控制 RAM 读取和写入；OUT/HLT 控制输出和停机。', 'ALUOp 只有 SUB 时为01；JMP 总是跳转，JZ 还要与 Z 相与；其他阶段的执行控制都应为0。'], 'InstructionController', instructionControl, controllerCases),
   lesson(41, '字节存储器', '扩展到完整地址空间', 'Addr 选择 256 格字节。Q 组合读取当前地址；W 沿上写入 D；R 沿上清空全部 RAM，优先于写入。',
     'Q=M[Addr]；沿上 M[Addr]←D（W=1）；R 清空', [['Addr', 8], ['D', 8], ['W', 1], ['R', 1]], [['Q', 8]],
     ['RAM 的 addr、d、we、rst 分别接 Addr、D、W、R。', '改变 Addr 后可以立即读另一格，写入仍等待时钟沿。', '确认高地址与低地址相互独立；同步复位清空所有格。'], 'Memory256x8'),
@@ -74,13 +74,13 @@ export const architectureLevels: Level[] = [
     '沿上 Out←R?0:Write?D:Out', [['D', 8], ['Write', 1], ['R', 1]], [['Out', 8]],
     ['输出端口也是一个八位使能寄存器。', 'Write 控制新数据与旧 Out 的选择。', '把 R 接同步复位；输入 D 改变时不能直接改变 Out。'], 'OutputPort8'),
   lesson(43, '指令数据通路', '寄存器与控制器一起执行', 'Exec 沿上执行当前指令，Data 提供 LOAD 数据。MOVI A/ADD/SUB/LOAD 更新 Z；HLT 或非法指令锁定状态到复位。跳转与访存信号组合输出，Target/Addr 始终是 Imm，Store 始终是 A。',
-    '执行=A/B/ALU/Out 的同步更新；Fault 同时锁定 Halt', [['Instruction', 16], ['Data', 8], ['Exec', 1], ['R', 1]],
+    '沿上A←WA?(MOVI→Imm;ADD/SUB→ALU(A,B,ALUOp);LOAD→Data):A;\nB←WB?Imm:B;\nZ←WA?（写入A的值=0）:Z;\nOut←OutWrite?A:Out;\n满足Exec∧(HLT∨Invalid)后Halt=1，直到R清零;\n满足Exec∧Invalid后Fault=1，直到R清零;\nTarget=Addr=Imm;Store=A', [['Instruction', 16], ['Data', 8], ['Exec', 1], ['R', 1]],
     [['A', 8], ['B', 8], ['Z', 1], ['Out', 8], ['Halt', 1], ['Fault', 1], ['Jump', 1], ['Target', 8], ['Addr', 8], ['Store', 8], ['MemWrite', 1], ['MemRead', 1]],
     ['组合控制用 Exec∧¬Halt 门控；HLT 与非法编码用寄存器记住停止状态。', 'Z 是寄存器：只随写 A 更新，初始为0；OUT 保存旧 A。', 'Target/Addr 从指令低八位直接输出，Store 直接接 A；R 优先清除 A/B/Z/Out/Halt/Fault。'], 'InstructionDatapath'),
   lesson(44, '我的八位计算机', '让真实电路执行程序', '用 ROM、RAM 和门级数据通路组成三阶段 CPU。阶段0取指，1译码，2执行并更新 PC。E=0 冻结；R 清空机器与 RAM；HLT/非法保持 PC 与阶段2。Memory 组合显示 IR 低八位地址对应的 RAM 值。',
     'Fetch→Decode→Execute；程序驱动真实电路', [['E', 1], ['R', 1]],
     [['PC', 8], ['IR', 16], ['Phase', 2], ['A', 8], ['B', 8], ['Z', 1], ['Out', 8], ['Halt', 1], ['Fault', 1], ['Memory', 8]],
-    ['ROM 节点 ID=program。IR 在阶段0捕获，阶段2用 IR 的控制信号执行。', '普通指令完成后 PC 加1，JMP/JZ 选择目标；HLT/非法将机器停在阶段2。', 'E 门控所有状态与 RAM 写入；R 沿上清状态/RAM但保留 ROM，机器观察面板显示真实电路的状态。'], 'Computer8'),
+    ['ROM 节点 ID=program。IR 在阶段0捕获，阶段2用 IR 的控制信号执行。', '普通指令完成后 PC 加1，JMP/JZ 选择目标；HLT/非法将机器停在阶段2（设置 Halt，PC 不更新）。', 'E 门控所有状态与 RAM 写入；R 沿上清状态/RAM但保留 ROM，机器观察面板显示真实电路的状态。'], 'Computer8'),
 ];
 
 function scenarios(id: number, inputPorts: Port[]): TestSequence[] {

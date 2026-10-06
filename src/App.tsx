@@ -12,8 +12,10 @@ import { createId } from './id';
 import { loadWorkspace, saveWorkspace, type Workspace } from './storage';
 import { CircuitNodeView, GateSymbol, nodeDimensions, type FlowNode } from './CircuitNode';
 import { WireEdge, type FlowEdge } from './WireEdge';
+import { CircuitPreview, ComponentPreview } from './ComponentPreview';
 import { TimingWaveform } from './TimingWaveform';
 import { ArchitecturePanel, ProgramEditor } from './ArchitecturePanel';
+import { instructionSet } from './architectureSpec';
 import { architectureLibrary } from './architectureCircuits';
 import { ProgrammingPanel } from './ProgrammingPanel';
 import { programmingCases } from './programmingSpec';
@@ -27,7 +29,7 @@ const clone = <T,>(value: T): T => structuredClone(value);
 function ToolButton({ label, children, onClick, disabled = false, active = false }: {
   label: string; children: ReactNode; onClick: () => void; disabled?: boolean; active?: boolean;
 }) {
-  return <button className={`tool-button ${active ? 'active' : ''}`} aria-label={label} title={label} onClick={onClick} disabled={disabled}>{children}</button>;
+  return <button className={`tool-button ${active ? 'active' : ''}`} aria-label={label} data-tooltip={label} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 
 function Workshop() {
@@ -41,7 +43,7 @@ function Workshop() {
   const temporal = level.mode === 'sequential' || programming;
   const architecture = level.chapter === 6;
   const teachingLibrary = useMemo(architectureLibrary, []);
-  const inspectionLibrary = { ...teachingLibrary, ...workspace.library };
+  const inspectionLibrary = useMemo(() => ({ ...teachingLibrary, ...workspace.library }), [teachingLibrary, workspace.library]);
   const inputs = workspace.inputs[current];
   const [history, setHistory] = useState<Record<number, { past: Circuit[]; future: Circuit[] }>>({});
   const [result, setResult] = useState<TestResult | null>(null);
@@ -56,10 +58,12 @@ function Workshop() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [panel, setPanel] = useState<'task' | 'selection'>('task');
   const [libraryTab, setLibraryTab] = useState(false);
+  const [paletteTab, setPaletteTab] = useState<'available' | 'teaching'>('available');
   const [busy, setBusy] = useState('');
   const [packageMode, setPackageMode] = useState<'selection' | 'whole' | null>(null);
   const [componentName, setComponentName] = useState('');
   const [inspect, setInspect] = useState<ComponentDefinition | null>(null);
+  const [instructionSpecOpen, setInstructionSpecOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [failureOnly, setFailureOnly] = useState(false);
   const [busBits, setBusBits] = useState(4);
@@ -79,7 +83,7 @@ function Workshop() {
   const boardElement = useRef<HTMLDivElement>(null);
   const flow = useReactFlow<FlowNode, FlowEdge>();
   useEffect(() => {
-    if (programming && !machineVisible) return;
+    if (programming) return;
     let frame: number;
     const fitWhenMeasured = () => {
       const nodes = flow.getNodes();
@@ -119,6 +123,7 @@ function Workshop() {
   useEffect(() => {
     setObservedStep(null); setTestView('cases'); setProgramId(null); setProgramDirty(false); setMachineVisible(false); setBreakpoints([]);
     setBusBits(getLevel(current).chapter === 6 ? Math.max(8, ...getLevel(current).inputPorts.map(p => p.bits)) : getLevel(current).mode === 'sequential' ? Math.max(...getLevel(current).inputPorts.map(p => p.bits)) : 4);
+    if (getLevel(current).chapter !== 6) setPaletteTab('available');
   }, [current]);
   useEffect(() => { setObservedStep(null); }, [circuit.revision, fitEpoch]);
 
@@ -432,12 +437,13 @@ function Workshop() {
   const selectedNode = circuit.nodes.find(n => selection.nodes.includes(n.id));
   const selectedWire = circuit.wires.find(w => selection.wires.includes(w.id));
   const hasEditableSelection = !programming && circuit.nodes.some(n => selection.nodes.includes(n.id) && n.type !== 'INPUT' && n.type !== 'OUTPUT');
+  const visibleLibraryEntries = Object.entries(workspace.library).filter(([key, definition]) => !teachingLibrary[key] || (definition.sourceLevel ?? 0) < current);
 
   return <div className={`workshop ${temporal ? 'temporal-workshop' : ''} ${programming ? 'programming-workshop' : ''}`}>
     <aside className={`sidebar ${chapterOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><span className="brand-mark"><CircuitBoard size={23} /></span><div><strong>逻辑工坊</strong><span>LOGIC WORKSHOP</span></div>
         <button className="close-sidebar tool-button" aria-label="关闭关卡目录" onClick={() => setChapterOpen(false)}><X size={18} /></button></div>
-      <div className="library-tabs"><button className={!libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(false)}><BookOpen size={14} />关卡</button><button className={libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(true)}><Package size={14} />组件库 <small>{Object.keys(workspace.library).length}</small></button></div>
+      <div className="library-tabs"><button className={!libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(false)}><BookOpen size={14} />关卡</button><button className={libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(true)}><Package size={14} />组件库 <small>{visibleLibraryEntries.length}</small></button></div>
       <div className="sidebar-scroll">
       {!libraryTab ? <nav className="lesson-list" aria-label="关卡">
         {levels.map(item => <button key={item.id} className={`lesson ${item.id === current ? 'current' : ''}`} disabled={item.id > unlocked}
@@ -447,20 +453,21 @@ function Workshop() {
           {item.id === current && <ChevronRight size={15} />}
         </button>)}
       </nav> : <section className="saved-components" aria-label="组件库">
-        {Object.entries(workspace.library).filter(([key, definition]) => !teachingLibrary[key] || (definition.sourceLevel ?? 0) < current).map(([key, definition]) => <div className="library-item" key={key}>
+        {visibleLibraryEntries.map(([key, definition]) => <div className="library-item" key={key}>
           <button className="component" aria-label={`添加组件 ${definition.name} v${definition.version}`} disabled={programming} draggable={!programming} onDragStart={e => e.dataTransfer.setData('application/logic-component', key)} onClick={() => placeComponent(key)}>
             <Package size={23} /><span><strong>{definition.name}</strong><small>v{definition.version} · {definition.inputs.length} 输入 / {definition.outputs.length} 输出</small></span><Plus size={15} /></button>
           <button className="library-inspect" onClick={() => setInspect(definition)}>查看内部电路</button>
         </div>)}
-        {!Object.keys(workspace.library).length && <p className="library-empty">组件库为空</p>}
+        {!visibleLibraryEntries.length && <p className="library-empty">组件库为空</p>}
       </section>}
-      {architecture && <section className="teaching-components" aria-label="教学组件"><div className="sidebar-section-title"><Package size={14} /><span>教学组件</span></div><p>已学模块，可查看内部电路或使用自己的作品。</p>
+      {architecture && <div className="palette-tabs" role="tablist" aria-label="组件区域"><button role="tab" aria-selected={paletteTab === 'available'} className={paletteTab === 'available' ? 'chosen' : ''} onClick={() => setPaletteTab('available')}><Cable size={14} />基础组件</button><button role="tab" aria-selected={paletteTab === 'teaching'} className={paletteTab === 'teaching' ? 'chosen' : ''} onClick={() => setPaletteTab('teaching')}><Package size={14} />教学组件</button></div>}
+      {architecture && paletteTab === 'teaching' && <section className="teaching-components palette-panel" aria-label="教学组件"><p>已学模块，可查看内部电路或使用自己的作品。</p>
         {Object.entries(teachingLibrary).filter(([, definition]) => (definition.sourceLevel ?? 0) < current).map(([key, definition]) => <div className="library-item" key={key}>
           <button className="component" aria-label={`添加教学组件 ${definition.name}`} draggable onDragStart={e => e.dataTransfer.setData('application/logic-component', key)} onClick={() => placeComponent(key)}><Package size={23} /><span><strong>{definition.name}</strong><small>{definition.inputs.length} 输入 / {definition.outputs.length} 输出</small></span><Plus size={15} /></button>
           <button className="library-inspect" aria-label={`查看教学组件 ${definition.name}`} onClick={() => setInspect(definition)}>查看内部电路</button>
         </div>)}
       </section>}
-      {!programming && <div className="components-section"><div className="sidebar-section-title"><Cable size={14} /><span>可用组件</span><span className="component-count">{level.allowed.length}</span></div>
+      {!programming && (!architecture || paletteTab === 'available') && <div className="components-section palette-panel">{!architecture && <div className="sidebar-section-title"><Cable size={14} /><span>可用组件</span><span className="component-count">{level.allowed.length}</span></div>}
         {level.allowed.includes('SPLIT') && <label className="bus-size">元件位宽<select aria-label="总线位宽" value={busBits} onChange={e => setBusBits(Number(e.target.value))}>{level.allowed.includes('CONST') && <option value="1">1 bit</option>}<option value="2">2 bit</option><option value="4">4 bit</option>{(temporal || architecture) && <option value="8">8 bit</option>}{architecture && <option value="16">16 bit</option>}</select></label>}
         {level.allowed.length === 0 ? <div className="wire-component"><Cable size={26} /><div><strong>导线</strong><span>1 bit</span></div></div> : level.allowed.map(type =>
           <button className="component" key={type} aria-label={`添加 ${type}`} draggable onDragStart={e => { e.dataTransfer.setData('application/logic-gate', type); e.dataTransfer.effectAllowed = 'copy'; }} onClick={() => add(type)}>
@@ -494,19 +501,19 @@ function Workshop() {
           <ToolButton label={temporal ? '单步周期' : '下一组输入'} disabled={temporal && (simulation.pending || !!busy)} onClick={() => { setPlaying(false); step(); }}><StepForward size={18} /></ToolButton>
           {temporal && <ToolButton label="清零状态" disabled={simulation.pending || !!busy} onClick={() => { setPlaying(false); setObservedStep(null); simulation.reset(); }}><RotateCcw size={16} /></ToolButton>}
           {busy ? <button className="test-button" aria-label="取消后台任务" onClick={cancelTask}><X size={16} /><span>{busy}</span></button> : <button className="test-button" aria-label={programming ? '测试程序' : '测试电路'} disabled={programming && programDirty} onClick={() => void runTest()}><CircleCheck size={16} /><span>{programming ? '测试程序' : '测试电路'}</span></button>}
-          <button className="task-toggle tool-button" aria-label="查看任务" title="查看任务" onClick={() => setTaskOpen(true)}><SlidersHorizontal size={18} /></button>
+          <button className="task-toggle tool-button" aria-label="查看任务" data-tooltip="查看任务" onClick={() => setTaskOpen(true)}><SlidersHorizontal size={18} /></button>
         </div>
       </div>
 
       <div className="editor-content">
-        <section className="board-area" aria-label="电路画布">
+        <section className={`board-area ${programming && machineVisible ? 'machine-first' : ''}`} aria-label="电路画布">
           {programming && <ProgrammingPanel key={`${current}:${fitEpoch}`} levelId={current} node={circuit.nodes.find(node => node.id === 'program')!} simulation={simulation} result={resultCurrent ? result : null} busy={!!busy} playing={playing} inputs={inputs} onInputs={next => { setPlaying(false); applyInputs(next); }} breakpoints={breakpoints} onBreakpoints={setBreakpoints} onDirty={setProgramDirty} onEditing={() => setPlaying(false)}
             onApply={(words, programSource) => { commit({ ...circuit, revision: circuit.revision + 1, nodes: circuit.nodes.map(node => node.id === 'program' ? { ...node, words, programSource } : node) }); setFitEpoch(epoch => epoch + 1); notify('汇编已应用，当前用例已重新载入。'); }}
             onStep={() => { setPlaying(false); setObservedStep(null); simulation.programStep(true); }} onCycle={() => { setPlaying(false); step(); }} onRun={toggleRun}
             onRestart={() => { setPlaying(false); setObservedStep(null); simulation.reset(); }} onCase={caseId => { setPlaying(false); setObservedStep(null); applyInputs({ E: 1, R: 0 }); simulation.programCase(caseId); }} onReplay={replayProgram}
             machineVisible={machineVisible} onMachineView={() => setMachineVisible(visible => !visible)} />}
           <div className={`board ${programming && !machineVisible ? 'programming-machine-hidden' : ''}`} ref={boardElement}>
-            <ReactFlow<FlowNode, FlowEdge> nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+            {programming && machineVisible ? <div className="machine-preview"><CircuitPreview graph={circuit} library={inspectionLibrary} signals={{ values: { ...simulation.values, ...inputs }, portValues: simulation.portValues, wires: simulation.wires }} /></div> : <ReactFlow<FlowNode, FlowEdge> nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
               nodesConnectable={!programming}
               onConnect={makeConnection} connectOnClick={false} connectionRadius={28}
               isValidConnection={conn => !!conn.sourceHandle && !!conn.targetHandle && canConnect(circuit, conn.source, conn.sourceHandle, conn.target, conn.targetHandle, workspace.library)}
@@ -528,7 +535,7 @@ function Workshop() {
               panOnDrag={[1, 2]} selectionOnDrag deleteKeyCode={null} multiSelectionKeyCode="Shift"
               defaultEdgeOptions={{ type: 'wire' }} attributionPosition="bottom-left">
               <Background variant={BackgroundVariant.Dots} color="#cbd2d7" gap={20} size={1.1} />
-            </ReactFlow>
+            </ReactFlow>}
             <div className="board-labels"><span>输入</span><span>输出</span></div>
             <div className="board-legend"><span><i className="legend-one" />1</span><span><i className="legend-zero" />0</span><span><i className="legend-x" />X</span></div>
             {pending && <div className="connection-status"><Cable size={14} /><span>{circuit.nodes.find(n => n.id === pending.id)?.label}.{pending.handle}</span><ArrowRight size={13} /><span>输入端口</span><button aria-label="取消连线" onClick={() => setPending(null)}><X size={13} /></button></div>}
@@ -552,7 +559,7 @@ function Workshop() {
                   <td><button aria-label={`观察用例 ${index + 1}`} onClick={event => { event.stopPropagation(); observeSample(index); }}><span className="row-cursor">{index === selectedSample ? <ChevronRight size={12} /> : null}</span>{String(index + 1).padStart(2, '0')}</button></td>
                   {temporal && <><td className="scenario-label" title={timing.scenarioLabel}>{timing.scenarioLabel} · {timing.stepIndex + 1}</td><td>{timing.tick ? '↑' : '·'} {timing.cycle}</td></>}
                   {level.inputs.map(name => <td key={name}>{sample[name]}</td>)}{level.outputPorts.map(p => <td key={`expected-${p.id}`}>{expected[p.id]}</td>)}
-                  {level.outputPorts.map(p => { const actual = row?.actualOutputs[p.id] ?? (index === selectedSample ? simulation.values[p.id] ?? 'X' : '-'); return <td key={`actual-${p.id}`} className={typeof actual === 'string' && actual.includes('X') ? 'unknown-cell' : ''}>{actual}</td>; })}
+                  {level.outputPorts.map(p => { const actual = row?.actualOutputs[p.id] ?? (index === selectedSample ? simulation.values[p.id] ?? 'X' : '-'); const mismatched = row?.mismatches.includes(p.id); return <td key={`actual-${p.id}`} className={`${typeof actual === 'string' && actual.includes('X') ? 'unknown-cell' : ''} ${mismatched ? 'mismatch-cell' : ''}`}>{actual}</td>; })}
                   <td>{row ? <span className={`table-status ${row.passed ? 'pass' : 'fail'}`}>{row.passed ? <Check size={12} /> : <X size={12} />}{row.passed ? '通过' : '不一致'}</span> : <span className="untested">待测试</span>}</td>
                 </tr>;
               })}</tbody></table></div>}
@@ -567,10 +574,12 @@ function Workshop() {
             <button className="close-task tool-button" aria-label="关闭任务" onClick={() => setTaskOpen(false)}><X size={18} /></button></div>
           <div className="task-panel-scroll">
             {panel === 'task' ? <><div className="task-eyebrow">关卡 {String(current).padStart(2, '0')}<span>{workspace.proofs[current] ? '已完成' : '进行中'}</span></div>
-              <h1>{level.title}</h1><p className="task-story">{level.story}</p>
+              <h1>{level.title}</h1>
               {architecture && <ArchitecturePanel simulation={simulation} program={circuit.nodes.find(n => n.id === 'program' && n.type === 'ROM')} disabled={!!busy} onEdit={() => { setPlaying(false); setProgramId('program'); }} />}
               {programming && <ArchitecturePanel simulation={simulation} disabled={!!busy} onEdit={() => {}} />}
-              <div className="goal-section"><h3>目标</h3><p>{level.goal}</p><div className="formula">{level.formula}</div></div>
+              <div className="goal-section"><h3>目标</h3><p>{level.goal}</p><div className="formula">{level.formula}</div>
+                {architecture && current >= 37 && <button className="secondary-button instruction-spec-button" onClick={() => setInstructionSpecOpen(true)}><BookOpen size={14} />查看指令规范</button>}
+              </div>
               {temporal && <div className="timing-help"><Clock3 size={15} /><p>改变输入不会推进时钟。单步周期让全部 DFF 同时采样旧值，再更新输出。清零状态只重启试验；复位输入 R 需要在时钟沿生效。</p></div>}
               <div className="interface-section"><h3>接口</h3>{level.inputPorts.map(p => <div key={p.id}><span>输入</span><strong>{p.label}</strong><small>{p.bits} bit</small></div>)}{level.outputPorts.map(p => <div key={p.id}><span>输出</span><strong>{p.label}</strong><small>{p.bits} bit</small></div>)}</div>
               <div className="hint-section"><div><h3>思路提示</h3><span>{hintCount} / 3</span></div>
@@ -608,8 +617,15 @@ function Workshop() {
     {toast && <div className="toast" role="status"><CircleAlert size={16} /><span>{toast}</span><button aria-label="关闭通知" onClick={() => setToast('')}><X size={14} /></button></div>}
     {packageMode && <div className="modal-backdrop" onClick={() => setPackageMode(null)}><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="package-title" onClick={e => e.stopPropagation()}><Package size={24} /><h2 id="package-title">{packageMode === 'whole' ? '保存电路为组件' : '封装所选组件'}</h2><label className="property-input">组件名称<input autoFocus aria-label="组件名称" maxLength={60} value={componentName} onChange={e => setComponentName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveComponent(); if (e.key === 'Escape') setPackageMode(null); }} /></label><div><button className="secondary-button" onClick={() => setPackageMode(null)}>取消</button><button className="test-button" onClick={saveComponent}>保存组件</button></div></section></div>}
     {inspect && <div className="modal-backdrop" onClick={() => setInspect(null)}><section className="component-dialog" role="dialog" aria-modal="true" aria-label="组件内部电路" onClick={e => e.stopPropagation()}><header><h2>{inspect.name} <small>v{inspect.version}</small></h2><ToolButton label="关闭组件详情" onClick={() => setInspect(null)}><X size={18} /></ToolButton></header><div className="component-interfaces"><span>输入 {inspect.inputs.map(p => `${p.label}:${p.bits}`).join(' · ')}</span><span>输出 {inspect.outputs.map(p => `${p.label}:${p.bits}`).join(' · ')}</span></div>
-      <div className="component-preview"><ReactFlowProvider><ReactFlow<FlowNode, FlowEdge> nodes={inspect.graph.nodes.map(n => ({ id: n.id, type: 'circuit', position: n.position, measured: nodeDimensions(n.type, getPorts(n, inspectionLibrary)), data: { kind: n.type, label: n.label, bits: n.bits ?? 1, ports: getPorts(n, inspectionLibrary), value: 'X', inputValues: {}, portValues: {}, pending: null, failed: false, readOnly: true, onToggle: () => {}, onValue: () => {}, onPort: () => {} } }))} edges={inspect.graph.wires.map(w => ({ ...w, type: 'wire', data: { value: 'X', failed: false } }))} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} fitView minZoom={0.04}><Background gap={20} /></ReactFlow></ReactFlowProvider></div>
+      <div className="component-preview"><ComponentPreview definition={inspect} library={inspectionLibrary} /></div>
       <footer>{inspect.dependencies.length ? <span>依赖 {inspect.dependencies.map(key => inspectionLibrary[key]?.name ?? key).join(' · ')}</span> : <span>{inspect.graph.nodes.filter(n => n.type !== 'INPUT' && n.type !== 'OUTPUT').length} 个元件</span>}</footer></section></div>}
+    {instructionSpecOpen && <div className="modal-backdrop" onClick={() => setInstructionSpecOpen(false)}><section className="instruction-dialog" role="dialog" aria-modal="true" aria-labelledby="instruction-spec-title" onClick={e => e.stopPropagation()}>
+      <header><h2 id="instruction-spec-title">指令规范</h2><ToolButton label="关闭指令规范" onClick={() => setInstructionSpecOpen(false)}><X size={18} /></ToolButton></header>
+      <div className="instruction-dialog-body"><p>每条指令为 16 bit：<strong>Opcode[15:12]</strong> · <strong>Param[11:8]</strong> · <strong>Imm[7:0]</strong>。除 MOVI 外，Param 必须为 0；NOP、ADD、SUB、OUT、HLT 的 Imm 也必须为 0。未满足约束的编码为非法指令。</p>
+        <table><thead><tr><th>Opcode</th><th>Name</th><th>Param</th><th>Imm</th><th>Effect</th></tr></thead><tbody>{instructionSet.map(instruction => <tr key={instruction.opcode}><td>{instruction.opcode}</td><td><strong>{instruction.name}</strong></td><td>{instruction.param}</td><td>{instruction.immediate}</td><td>{instruction.effect}</td></tr>)}</tbody></table>
+        <p className="instruction-spec-note">Z 是零标志：最近一次写入 A 的结果为 0 时为 1，否则为 0；不写入 A 的指令不会更新它。控制器只在 Phase=2 执行有效指令；JZ 还要求 Z=1。ROM 编辑器中的指令字使用四位十六进制表示。</p>
+      </div>
+    </section></div>}
     {programId && circuit.nodes.find(n => n.id === programId && n.type === 'ROM') && <ProgramEditor key={`${current}:${programId}`} node={circuit.nodes.find(n => n.id === programId)!} activeProgram={programId === 'program' ? simulation.activeProgram : undefined} pc={simulation.values.PC} onClose={() => setProgramId(null)} onSave={words => { commit({ ...circuit, revision: circuit.revision + 1, nodes: circuit.nodes.map(n => { if (n.id !== programId) return n; const { programSource: _source, ...node } = n; return { ...node, words }; }) }); setProgramId(null); notify('ROM 程序已应用，运行状态已清零。'); }} />}
     {resetOpen && <div className="modal-backdrop" onClick={() => setResetOpen(false)}><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title" onClick={e => e.stopPropagation()}>
       <RotateCcw size={24} /><h2 id="reset-title">{programming ? '清空当前程序？' : '重置当前电路？'}</h2><p>{programming ? '清空汇编和ROM，保留CPU及通关进度。此操作可撤销。' : '移除本关的逻辑门与导线。章节进度保留，重置后可以撤销。'}</p><div><button autoFocus className="secondary-button" onClick={() => setResetOpen(false)}>取消</button><button className="danger-button" aria-label="确认重置" onClick={() => { const next = createCircuit(current); next.revision = circuit.revision + 1; commit(next); setResetOpen(false); }}>确认重置</button></div>

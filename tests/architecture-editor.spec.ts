@@ -55,9 +55,11 @@ test('a migrated stage-five save unlocks architecture and lets users place 16-bi
   await expect(page.getByTestId('progress-count')).toHaveText('32 / 56');
   await page.getByRole('button', { name: /第 33 关/ }).click();
   await expect(page.getByRole('heading', { name: '八位加减器', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: '基础组件', exact: true }).click();
   await page.getByRole('combobox', { name: '总线位宽' }).selectOption('16');
   await page.getByRole('button', { name: '添加 AND', exact: true }).click();
   await expect(page.locator('.gate-node .node-kind')).toContainText(['16 bit']);
+  await page.getByRole('tab', { name: '教学组件', exact: true }).click();
   await page.getByRole('button', { name: '查看教学组件 八位进位加法器', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '组件内部电路' })).toBeVisible();
   await expect(page.locator('.component-preview .gate-node')).not.toHaveCount(0);
@@ -69,6 +71,16 @@ test('a migrated stage-five save unlocks architecture and lets users place 16-bi
   expect(saved.library['architecture-mux8@1']).toBeDefined();
   await page.getByRole('button', { name: '撤销', exact: true }).click();
   expect((await exported(page)).circuits[33].nodes.filter(n => n.type === 'COMPONENT')).toHaveLength(0);
+});
+
+test('refreshes reused A and B handles when entering the register-pair lesson', async ({ page }) => {
+  const state = stateAt(35);
+  state.currentLevel = 34;
+  await load(page, state);
+  await page.getByRole('button', { name: /第 35 关/ }).click();
+  await expect(page.getByRole('heading', { name: '双寄存器组', exact: true })).toBeVisible();
+  await expect(page.locator('.react-flow__edge[aria-label="Edge from reference to A"]')).toHaveCount(1);
+  await expect(page.locator('.react-flow__edge[aria-label="Edge from reference to B"]')).toHaveCount(1);
 });
 
 test('ROM editing validates, commits atomically, undoes fully and retains instruction words through import', async ({ page }) => {

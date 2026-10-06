@@ -74,7 +74,17 @@ export function ProgrammingPanel({ levelId, node, simulation, result, busy, play
       const row = result?.rows.find(candidate => candidate.scenarioId === item.id);
       return <tr key={item.id} className={row && !row.passed ? 'failed-row' : ''}><td>{item.label}</td><td>{item.expectedOutput.join(' → ')}</td><td>{row ? <><span className={`table-status ${row.passed ? 'pass' : 'fail'}`}>{row.passed ? '通过' : row.program?.reason || '失败'}</span><small>{row.program?.actualOutput.join(' → ') || '尚无输出'} · {row.cycle} 周期</small></> : '待测试'}</td><td><button className="case-observe" aria-label={`观察程序用例 ${item.id}`} disabled={disabled || playing} onClick={() => row ? onReplay(row) : onCase(item.id)}>{row ? '回放' : '载入'}</button></td></tr>;
     })}</tbody></table></div><div className="program-cases-footer"><span>{result ? `${result.rows.filter(row => row.passed).length} / ${cases.length} 通过` : '尚未验证'}{dirty && ' · 测试运行已应用的程序，请先应用修改'}</span>{casePages > 1 && <div className="pagination"><button className="tool-button" aria-label="上一页程序用例" disabled={!shownPage} onClick={() => setCasesPage(page => page - 1)}><ChevronLeft size={14} /></button><span>{shownPage + 1} / {casePages}</span><button className="tool-button" aria-label="下一页程序用例" disabled={shownPage === casePages - 1} onClick={() => setCasesPage(page => page + 1)}><ChevronRight size={14} /></button></div>}</div></section>
-    <details className="assembly-help"><summary>指令速查与调试说明</summary><p>MOVI A/B, 字节；ADD / SUB：A与B运算；LOAD / STORE 地址：读写A；JMP 标签；JZ 标签：Z=1跳转；OUT：输出A；HLT：停止；NOP：空操作。数字可写十进制或0x十六进制，分号后为注释，标签用冒号结尾。</p><p>写A更新零标志，写B保持零标志。结果按256回绕。断点在取指前停止，继续会跳过当前位置一次。R复位会清空RAM；重新载入题目输入请使用“重启用例”。</p></details>
+    <details className="assembly-help"><summary>汇编示例与调试说明</summary><pre>{`start:  MOVI A, 42       ; 将十进制立即数 42 写入 A
+        MOVI B, 0x0D     ; 将十六进制立即数 0x0D 写入 B
+        ADD              ; A ← A + B，结果按 8 bit 回绕
+        SUB              ; A ← A - B，结果按 8 bit 回绕
+        LOAD 0xF0        ; A ← RAM[0xF0]
+        STORE 240        ; RAM[240] ← A
+        JZ zero          ; Z=1 时跳到标签 zero 处执行，否则继续顺序执行
+        JMP 0x0A         ; 无条件跳到 ROM[0x0A] 处执行，也就是标签 done
+zero:   OUT              ; 把 A 写入输出寄存器
+        NOP              ; 空操作
+done:   HLT              ; 停机`}</pre><p>标签以冒号结尾，分号后是注释；数字/地址可写十进制或 0x 十六进制；每个程序最多 256 条指令。Z=1 表示最近一次写入 A 的结果为 0，Z=0 表示结果非 0；只有写入 A 的指令更新 Z，其他指令保持原值。结果按 256 回绕。</p><p>断点在取指前停止，继续会跳过当前位置一次。R 复位会清空 RAM；重新载入题目输入请使用“重启用例”。</p></details>
     {result?.failure?.program && <p className="program-failure-detail" role="alert"><CircleAlert size={15} />{result.failure.scenarioLabel}：{result.failure.program.reason}，已回放到周期{result.failure.cycle}，可继续单步检查。</p>}
   </section>;
 }

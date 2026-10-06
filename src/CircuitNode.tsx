@@ -1,4 +1,4 @@
-import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
+import { Handle, Position, useUpdateNodeInternals, type NodeProps, type Node } from '@xyflow/react';
 import { useEffect, useState } from 'react';
 import { Lightbulb, Power, LockKeyhole, Package, Split, Combine, Hash, MemoryStick } from 'lucide-react';
 import type { NodeType, Signal, Port, GateType } from './contracts';
@@ -14,6 +14,9 @@ export interface CircuitNodeData extends Record<string, unknown> {
 export type FlowNode = Node<CircuitNodeData, 'circuit'>;
 export function nodeDimensions(kind: NodeType, ports: { inputs: Port[]; outputs: Port[] }) {
   return { width: ['COMPONENT', 'DFF', 'ROM', 'RAM'].includes(kind) ? 180 : 130, height: Math.max(106, 46 + Math.max(ports.inputs.length, ports.outputs.length) * 25) };
+}
+export function portTop(index: number, total: number) {
+  return total <= 2 ? (total === 2 ? 48 + index * 28 : 62) : 48 + index * 25;
 }
 
 export function GateSymbol({ type, small = false }: { type: GateType; small?: boolean }) {
@@ -54,13 +57,18 @@ export function CircuitNodeView({ id, data, selected }: NodeProps<FlowNode>) {
   const isInput = data.kind === 'INPUT';
   const isOutput = data.kind === 'OUTPUT';
   const dimensions = nodeDimensions(data.kind, data.ports);
+  const updateNodeInternals = useUpdateNodeInternals();
+  const displayBits = isOutput ? data.ports.inputs[0]?.bits : data.ports.outputs[0]?.bits ?? data.bits;
+  const displayValue = displayBits === 16 && typeof data.value === 'string' ? 'X' : data.value;
+  const portSignature = `${data.kind}:${data.ports.inputs.map(port => `${port.id}:${port.bits}`).join(',')}>${data.ports.outputs.map(port => `${port.id}:${port.bits}`).join(',')}`;
+  useEffect(() => { updateNodeInternals(id); }, [id, portSignature, updateNodeInternals]);
   const port = (p: Port, direction: 'input' | 'output', index: number, total: number) => {
     const v = direction === 'output' ? data.portValues[p.id] ?? data.value : data.inputValues[p.id] ?? 'X';
-    const top = total <= 2 ? (total === 2 ? 48 + index * 28 : 62) : 48 + index * 25;
+    const top = portTop(index, total);
     return <Handle key={p.id} id={p.id} type={direction === 'input' ? 'target' : 'source'} position={direction === 'input' ? Position.Left : Position.Right}
-      style={{ top }} className={`port ${signalClass(v)} ${data.pending === `${id}:${p.id}` ? 'pending' : ''}`}
+      style={{ top }} className={`port port-${direction} ${signalClass(v)} ${data.pending === `${id}:${p.id}` ? 'pending' : ''}`}
       data-testid={`port-${id}-${p.id}`} aria-label={`${data.label} ${direction === 'input' ? '输入' : '输出'} ${p.label}`}
-      title={`${data.label}.${p.label} · ${p.bits} bit · ${v}`} role="button" tabIndex={0}
+      data-tooltip={p.label} role="button" tabIndex={0}
       onClick={event => { event.stopPropagation(); data.onPort(id, p.id, direction); }}
       onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); data.onPort(id, p.id, direction); } }}>
       {(total > 2 || ['COMPONENT', 'DFF', 'ROM', 'RAM'].includes(data.kind)) && <span className={`port-label ${direction}`}>{p.label}</span>}
@@ -72,8 +80,8 @@ export function CircuitNodeView({ id, data, selected }: NodeProps<FlowNode>) {
     {isInput ? data.bits === 1 ? <button className="input-switch nodrag nopan" aria-label={`输入 ${id}`} disabled={data.readOnly} aria-pressed={data.value === 1} onClick={() => data.onToggle(id)}>
       <Power size={15} /><span>{data.value}</span><span className="switch-track"><i /></span>
     </button> : <BusInput id={id} data={data} />
-      : isOutput ? <div className="lamp-value"><Lightbulb size={24} strokeWidth={1.7} /><strong data-testid={`output-${id}`}>{data.value}</strong></div>
-      : <div className={`gate-body ${data.kind === 'COMPONENT' || data.kind === 'DFF' ? 'component-body' : ''} ${data.kind === 'SPLIT' || data.kind === 'JOIN' ? 'bus-body' : ''}`}>{data.kind === 'COMPONENT' ? <Package size={24} /> : <GateSymbol type={data.kind as GateType} />}<span className="node-signal">{data.value}</span></div>}
+      : isOutput ? <div className="lamp-value"><Lightbulb size={24} strokeWidth={1.7} /><strong data-testid={`output-${id}`}>{displayValue}</strong></div>
+      : <div className={`gate-body ${['COMPONENT', 'DFF', 'ROM', 'RAM'].includes(data.kind) ? 'component-body' : ''} ${data.kind === 'SPLIT' || data.kind === 'JOIN' ? 'bus-body' : ''}`}>{data.kind === 'COMPONENT' ? <Package size={24} /> : <GateSymbol type={data.kind as GateType} />}<span className="node-signal">{displayValue}</span></div>}
     {data.ports.inputs.map((p, i) => port(p, 'input', i, data.ports.inputs.length))}
     {data.ports.outputs.map((p, i) => port(p, 'output', i, data.ports.outputs.length))}
     {(isInput || isOutput) && <span className="fixed-marker" title="关卡固定端口"><LockKeyhole size={9} /></span>}

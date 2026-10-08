@@ -7,7 +7,7 @@ export interface CircuitNodeData extends Record<string, unknown> {
   kind: NodeType; label: string; value: Signal; bits: number;
   ports: { inputs: Port[]; outputs: Port[] }; portValues: Record<string, Signal>;
   inputValues: Record<string, Signal>; pending: string | null; failed: boolean;
-  readOnly?: boolean;
+  readOnly?: boolean; deleted?: boolean;
   onToggle: (id: string) => void; onValue: (id: string, value: number) => void;
   onPort: (id: string, handle: string, direction: 'input' | 'output') => void;
 }
@@ -74,9 +74,9 @@ export function CircuitNodeView({ id, data, selected }: NodeProps<FlowNode>) {
       {(total > 2 || ['COMPONENT', 'DFF', 'ROM', 'RAM'].includes(data.kind)) && <span className={`port-label ${direction}`}>{p.label}</span>}
     </Handle>;
   };
-  return <div style={dimensions} className={`circuit-node ${isInput || isOutput ? 'io-node' : 'gate-node'} ${signalClass(data.value)} ${selected ? 'selected' : ''} ${data.failed ? 'failed-node' : ''}`}
+  return <div style={dimensions} className={`circuit-node ${isInput || isOutput ? 'io-node' : 'gate-node'} ${signalClass(data.value)} ${selected ? 'selected' : ''} ${data.failed ? 'failed-node' : ''} ${data.deleted ? 'deleted-node' : ''}`}
     data-gate-id={isInput || isOutput ? undefined : id}>
-    <div className="node-heading"><span title={data.label}>{data.label}</span><span className="node-kind">{data.kind === 'COMPONENT' ? '组件' : `${data.bits} bit`}</span></div>
+    <div className="node-heading"><span title={data.label}>{data.label}</span><span className="node-kind">{data.deleted ? '已删除' : data.kind === 'COMPONENT' ? '组件' : `${data.bits} bit`}</span></div>
     {isInput ? data.bits === 1 ? <button className="input-switch nodrag nopan" aria-label={`输入 ${id}`} disabled={data.readOnly} aria-pressed={data.value === 1} onClick={() => data.onToggle(id)}>
       <Power size={15} /><span>{data.value}</span><span className="switch-track"><i /></span>
     </button> : <BusInput id={id} data={data} />

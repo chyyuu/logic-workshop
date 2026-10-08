@@ -3,6 +3,7 @@ import { levels } from './levels';
 import { judge } from './simulator';
 import { assemble } from './assembler';
 import { programmingMachine, programmingMachineLibrary } from './programmingMachine';
+import { pruneDeletedComponents } from './componentManagement';
 import type { Circuit, CircuitGraph, CircuitNode, ComponentDefinition, ComponentLibrary, Inputs, NodeType, Port, Wire } from './contracts';
 
 export const STORAGE_KEY = 'logic-workshop.v1';
@@ -123,10 +124,12 @@ function parseLibrary(raw: unknown): ComponentLibrary {
     const graph = parseGraph(definition.graph);
     nodeCount += graph.nodes.length;
     if (nodeCount > 20_000) throw new Error('组件库超过总规模限制。');
+    if (definition.deleted !== undefined && definition.deleted !== true) throw new Error('组件删除状态无效。');
     const parsed: ComponentDefinition = { id: definition.id, version: definition.version as number, name: definition.name,
       inputs: parsePorts(definition.inputs), outputs: parsePorts(definition.outputs), graph,
       dependencies: [...definition.dependencies] as string[],
-      ...(definition.sourceLevel === undefined ? {} : { sourceLevel: definition.sourceLevel as number }) };
+      ...(definition.sourceLevel === undefined ? {} : { sourceLevel: definition.sourceLevel as number }),
+      ...(definition.deleted === true ? { deleted: true as const } : {}) };
     library[key] = parsed;
   }
   const errors = validateLibrary(library);
@@ -198,7 +201,8 @@ export function loadWorkspace(): { workspace: Workspace; savedText?: string; err
   }
 }
 
-export function saveWorkspace(workspace: Workspace) {
+export function serializeWorkspace(workspace: Workspace, space?: number) {
+  workspace = pruneDeletedComponents(workspace);
   const graph = (value: CircuitGraph): CircuitGraph => ({
     nodes: value.nodes.map(({ id, type, label, position, bits, value: constant, componentKey, words, programSource }) => ({
       id, type, label, position: { x: position.x, y: position.y },
@@ -215,8 +219,13 @@ export function saveWorkspace(workspace: Workspace) {
   const library = Object.fromEntries(Object.entries(workspace.library).map(([key, definition]) => [key, {
     id: definition.id, version: definition.version, name: definition.name,
     inputs: ports(definition.inputs), outputs: ports(definition.outputs), dependencies: [...definition.dependencies],
-    ...(definition.sourceLevel === undefined ? {} : { sourceLevel: definition.sourceLevel }), graph: graph(definition.graph),
+    ...(definition.sourceLevel === undefined ? {} : { sourceLevel: definition.sourceLevel }),
+    ...(definition.deleted ? { deleted: true } : {}), graph: graph(definition.graph),
   }]));
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: workspace.version, currentLevel: workspace.currentLevel,
-    circuits: circuits(workspace.circuits), proofs: circuits(workspace.proofs), inputs: workspace.inputs, library }));
+  return JSON.stringify({ version: workspace.version, currentLevel: workspace.currentLevel,
+    circuits: circuits(workspace.circuits), proofs: circuits(workspace.proofs), inputs: workspace.inputs, library }, null, space);
+}
+
+export function saveWorkspace(workspace: Workspace) {
+  localStorage.setItem(STORAGE_KEY, serializeWorkspace(workspace));
 }

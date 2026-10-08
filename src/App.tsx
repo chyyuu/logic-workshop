@@ -2,14 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, useReactFlow, type Connection, type NodeChange, type EdgeChange } from '@xyflow/react';
 import { CircuitBoard, Check, ChevronRight, ArrowRight, Undo2, Redo2, Trash2, RotateCcw, Play, Pause, StepForward,
   ZoomIn, ZoomOut, Maximize, Download, Upload, LockKeyhole, Lightbulb, X, CircleCheck, CircleAlert,
-  Menu, SlidersHorizontal, Cable, Plus, BookOpen, MousePointer2, Copy, Package, UnfoldHorizontal, ChevronLeft, Clock3 } from 'lucide-react';
+  Menu, SlidersHorizontal, Cable, Plus, BookOpen, MousePointer2, Copy, Package, UnfoldHorizontal, ChevronLeft, Clock3, Pencil, Eye, Replace } from 'lucide-react';
 import { addGate, addComponent, getPorts, validateCircuit, connect, canConnect, createCircuit, removeSelection, type Circuit } from './model';
 import { levels, getLevel, testInputs, testSequences, type GateType, type Inputs } from './levels';
 import type { TestResult, ComponentDefinition, ComponentLibrary } from './contracts';
 import { encapsulateSelection, expandComponent, packageCircuit } from './components';
 import { backgroundTask, useSimulation } from './workerClient';
 import { createId } from './id';
-import { loadWorkspace, saveWorkspace, type Workspace } from './storage';
+import { loadWorkspace, saveWorkspace, serializeWorkspace, type Workspace } from './storage';
+import { componentInterfacesMatch, dependentComponentKeys, graphUsesDeletedComponent, markComponentsDeleted, renameComponent,
+  renameComponentInstances, replaceComponentInstance } from './componentManagement';
 import { CircuitNodeView, GateSymbol, nodeDimensions, type FlowNode } from './CircuitNode';
 import { WireEdge, type FlowEdge } from './WireEdge';
 import { CircuitPreview, ComponentPreview } from './ComponentPreview';
@@ -62,6 +64,11 @@ function Workshop() {
   const [busy, setBusy] = useState('');
   const [packageMode, setPackageMode] = useState<'selection' | 'whole' | null>(null);
   const [componentName, setComponentName] = useState('');
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
+  const [replacementKey, setReplacementKey] = useState('');
   const [inspect, setInspect] = useState<ComponentDefinition | null>(null);
   const [instructionSpecOpen, setInstructionSpecOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -81,6 +88,9 @@ function Workshop() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const boardElement = useRef<HTMLDivElement>(null);
+  const sidebarScrollPositions = useRef({ levels: 0, library: 0 });
+  const restoreLevelScroll = useCallback((element: HTMLElement | null) => { if (element) element.scrollTop = sidebarScrollPositions.current.levels; }, []);
+  const restoreLibraryScroll = useCallback((element: HTMLElement | null) => { if (element) element.scrollTop = sidebarScrollPositions.current.library; }, []);
   const flow = useReactFlow<FlowNode, FlowEdge>();
   useEffect(() => {
     if (programming) return;
@@ -115,6 +125,7 @@ function Workshop() {
     : samples.findIndex(i => level.inputs.every(name => i[name] === inputs[name]));
 
   const simulation = useSimulation(circuit, inputs, workspace.library, fitEpoch);
+  const hasDeletedComponents = graphUsesDeletedComponent(circuit, workspace.library);
   const rowsToShow = useMemo(() => samples.map((sample, index) => ({ sample, index })).filter(({ index }) => !failureOnly || (resultCurrent && result?.rows[index] && !result.rows[index].passed)), [samples, failureOnly, resultCurrent, result]);
   const pages = Math.max(1, Math.ceil(rowsToShow.length / 8));
   const shownPage = Math.min(page, pages - 1);
@@ -135,7 +146,7 @@ function Workshop() {
     setBusy('验证通关记录');
     void backgroundTask<Workspace>('load', { text: initial.savedText }, controller.signal).then(restored => {
       setWorkspace(restored);
-      setPending(null); setSelection({ nodes: [], wires: [] }); setInspect(null); setPackageMode(null); setResetOpen(false); setPanel('task');
+      setPending(null); setSelection({ nodes: [], wires: [] }); setInspect(null); setPackageMode(null); setReplaceTarget(null); setResetOpen(false); setPanel('task');
       setFitEpoch(epoch => epoch + 1);
       setBusy(''); setVerifyingInitial(false);
     }).catch(error => { if (error.name !== 'AbortError') { setBusy(''); setVerifyingInitial(false); setSaveStatus('存档读取失败；新编辑会创建存档'); notify(`存档读取失败：${error.message}`); } });
@@ -206,7 +217,7 @@ function Workshop() {
     setFitEpoch(epoch => epoch + 1);
     setWorkspace(w => ({ ...w, currentLevel: id }));
     setResult(null); setPending(null); setSelection({ nodes: [], wires: [] }); setPlaying(false);
-    setChapterOpen(false); setTaskOpen(false); setPanel('task');
+    setChapterOpen(false); setTaskOpen(false); setReplaceTarget(null); setPanel('task');
   };
 
   const vacantPosition = (width: number, height: number) => {
@@ -233,16 +244,24 @@ function Workshop() {
   const makeConnection = useCallback((connection: Connection) => {
     if (programming) return;
     if (!connection.sourceHandle || !connection.targetHandle) return;
-    try { commit(connect(circuit, connection.source, connection.sourceHandle, connection.target, connection.targetHandle, workspace.library)); }
+    try {
+      const endpoints = [connection.source, connection.target].map(id => circuit.nodes.find(node => node.id === id));
+      if (endpoints.some(node => node?.type === 'COMPONENT' && workspace.library[node.componentKey ?? '']?.deleted)) {
+        throw new Error('已删除组件只能从关卡中移除。');
+      }
+      commit(connect(circuit, connection.source, connection.sourceHandle, connection.target, connection.targetHandle, workspace.library));
+    }
     catch (error) { notify((error as Error).message); }
   }, [programming, circuit, commit, notify, workspace.library]);
 
   const onPort = useCallback((id: string, handle: string, direction: 'input' | 'output') => {
+    const node = circuit.nodes.find(item => item.id === id);
+    if (node?.type === 'COMPONENT' && workspace.library[node.componentKey ?? '']?.deleted) { notify('已删除组件只能从关卡中移除。'); return; }
     if (direction === 'output') { setPending(p => p?.id === id && p.handle === handle ? null : { id, handle }); return; }
     if (!pending) { notify('先选择一个输出端口。'); return; }
     makeConnection({ source: pending.id, sourceHandle: pending.handle, target: id, targetHandle: handle });
     setPending(null);
-  }, [pending, makeConnection, notify]);
+  }, [pending, makeConnection, notify, circuit.nodes, workspace.library]);
 
   const undo = useCallback(() => {
     const h = history[current]; if (!h?.past.length) return;
@@ -276,6 +295,7 @@ function Workshop() {
     let next = circuit;
     const ids = new Map<string, string>();
     try {
+      if (chosen.some(node => node.type === 'COMPONENT' && workspace.library[node.componentKey ?? '']?.deleted)) throw new Error('已删除组件不能复制。');
       for (const n of chosen) {
         const id = createId('g'); ids.set(n.id, id);
         next = { ...next, revision: next.revision + 1, nodes: [...next.nodes, { ...clone(n), id, position: { x: n.position.x + 32, y: n.position.y + 130 } }] };
@@ -290,18 +310,19 @@ function Workshop() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setPending(null); setChapterOpen(false); setTaskOpen(false); setResetOpen(false); setPackageMode(null); setInspect(null); return; }
-      if ((event.target as HTMLElement).closest('input, textarea, select') || resetOpen || packageMode || inspect) return;
+      if (event.key === 'Escape') { setPending(null); setChapterOpen(false); setTaskOpen(false); setResetOpen(false); setPackageMode(null); setInspect(null); setRenameTarget(null); setDeleteTarget(null); setReplaceTarget(null); return; }
+      if ((event.target as HTMLElement).closest('input, textarea, select') || resetOpen || packageMode || inspect || renameTarget || deleteTarget || replaceTarget) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelected(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelected(); }
     };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, deleteSelected, duplicateSelected, resetOpen, packageMode, inspect]);
+  }, [undo, redo, deleteSelected, duplicateSelected, resetOpen, packageMode, inspect, renameTarget, deleteTarget, replaceTarget]);
 
   const runTest = async () => {
     if (programming && programDirty) { notify('请先应用汇编修改。'); return; }
+    if (hasDeletedComponents) { notify('当前电路包含已删除组件，请先将其移除。'); return; }
     cancelTask();
     const id = ++taskId.current;
     const controller = new AbortController(); taskAbort.current = controller;
@@ -331,6 +352,8 @@ function Workshop() {
     try {
       cancelTask();
       if (!componentName.trim()) throw new Error('请输入组件名称。');
+      const selectedGraph = packageMode === 'whole' ? circuit : { nodes: circuit.nodes.filter(node => selection.nodes.includes(node.id)), wires: [] };
+      if (graphUsesDeletedComponent(selectedGraph, workspace.library)) throw new Error('已删除组件不能保存到新组件中。');
       if (packageMode === 'whole') {
         const packaged = packageCircuit(circuit, componentName.trim(), workspace.library);
         setWorkspace(w => ({ ...w, library: packaged.library }));
@@ -365,7 +388,7 @@ function Workshop() {
   };
 
   const exportSave = () => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(workspace, null, 2)], { type: 'application/json' }));
+    const url = URL.createObjectURL(new Blob([serializeWorkspace(workspace, 2)], { type: 'application/json' }));
     const a = document.createElement('a'); a.href = url; a.download = 'logic-workshop-save.json'; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify('存档已导出。');
@@ -382,10 +405,41 @@ function Workshop() {
       setBusy(''); setPage(0); setFailureOnly(false);
       setFitEpoch(epoch => epoch + 1);
       setWorkspace(imported); setHistory({}); setResult(null); setSelection({ nodes: [], wires: [] }); setPending(null); setPlaying(false);
-      setInspect(null); setPackageMode(null); setResetOpen(false); setProgramId(null); setPanel('task'); setBreakpoints([]); setProgramDirty(false); setMachineVisible(false);
+      setInspect(null); setPackageMode(null); setReplaceTarget(null); setResetOpen(false); setProgramId(null); setPanel('task'); setBreakpoints([]); setProgramDirty(false); setMachineVisible(false);
       notify('存档已导入，通关记录已重新验证。');
     } catch (error) { if ((error as Error).name !== 'AbortError') { setBusy(''); notify(`导入失败：${(error as Error).message}`); } }
     if (importInput.current) importInput.current.value = '';
+  };
+
+  const openRename = (key: string) => {
+    const definition = workspace.library[key];
+    if (!definition || definition.deleted || teachingLibrary[key]) return;
+    setRenameTarget(key); setRenameName(definition.name);
+  };
+  const applyRename = () => {
+    if (!renameTarget) return;
+    try {
+      const name = renameName.trim();
+      const renamed = renameComponent(workspace, renameTarget, name);
+      setWorkspace(renamed);
+      setHistory(all => Object.fromEntries(Object.entries(all).map(([levelId, entry]) => [levelId, {
+        past: entry.past.map(item => renameComponentInstances(item, renameTarget, name)),
+        future: entry.future.map(item => renameComponentInstances(item, renameTarget, name)),
+      }])));
+      setRenameTarget(null); notify('组件已重命名。');
+    } catch (error) { notify((error as Error).message); }
+  };
+  const openDelete = (key: string) => {
+    if (!workspace.library[key] || teachingLibrary[key]) return;
+    const affected = dependentComponentKeys(workspace.library, key);
+    if (affected.some(item => teachingLibrary[item])) { notify('内置教学组件不能删除。'); return; }
+    setDeleteTarget(key);
+  };
+  const deleteKeys = deleteTarget ? dependentComponentKeys(workspace.library, deleteTarget) : [];
+  const applyDelete = () => {
+    if (!deleteTarget) return;
+    setWorkspace(value => ({ ...value, library: markComponentsDeleted(value.library, dependentComponentKeys(value.library, deleteTarget)) }));
+    setDeleteTarget(null); setInspect(null); setPlaying(false); setPending(null); setResult(null); notify('组件已删除。');
   };
 
   const showFailure = !!(resultCurrent && result?.failure && level.inputs.every(name => result.failure!.inputs[name] === inputs[name])
@@ -399,6 +453,7 @@ function Workshop() {
       portValues: Object.fromEntries(getPorts(node, workspace.library).outputs.map(p => [p.id, node.type === 'INPUT' ? inputs[node.id] : simulation.portValues[`${node.id}:${p.id}`] ?? 'X'])),
       inputValues: Object.fromEntries(circuit.wires.filter(w => w.target === node.id).map(w => [w.targetHandle, simulation.wires[w.id]])),
       pending: pending ? `${pending.id}:${pending.handle}` : null, failed: showFailure && !!result?.failure?.mismatches.includes(node.id),
+      deleted: node.type === 'COMPONENT' && !!workspace.library[node.componentKey ?? '']?.deleted,
       onToggle: id => { setPlaying(false); applyInputs({ ...inputs, [id]: inputs[id] === 1 ? 0 : 1 }); }, onPort,
       onValue: (id, value) => { setPlaying(false); applyInputs({ ...inputs, [id]: Math.trunc(value) }); },
     } }));
@@ -437,7 +492,37 @@ function Workshop() {
   const selectedNode = circuit.nodes.find(n => selection.nodes.includes(n.id));
   const selectedWire = circuit.wires.find(w => selection.wires.includes(w.id));
   const hasEditableSelection = !programming && circuit.nodes.some(n => selection.nodes.includes(n.id) && n.type !== 'INPUT' && n.type !== 'OUTPUT');
-  const visibleLibraryEntries = Object.entries(workspace.library).filter(([key, definition]) => !teachingLibrary[key] || (definition.sourceLevel ?? 0) < current);
+  const selectionUsesDeleted = circuit.nodes.some(n => selection.nodes.includes(n.id) && n.type === 'COMPONENT' && workspace.library[n.componentKey ?? '']?.deleted);
+  const visibleLibraryEntries = Object.entries(workspace.library).filter(([key, definition]) => !definition.deleted && (!teachingLibrary[key] || (definition.sourceLevel ?? 0) < current));
+  const replaceableNode = !programming && selection.nodes.length === 1 && selectedNode?.type === 'COMPONENT' ? selectedNode : null;
+  const replacementNode = replaceTarget ? circuit.nodes.find(node => node.id === replaceTarget && node.type === 'COMPONENT') : undefined;
+  const replacementSource = replacementNode?.type === 'COMPONENT' ? workspace.library[replacementNode.componentKey ?? ''] : undefined;
+  const replacementPool = new Map<string, ComponentDefinition>([
+    ...Object.entries(workspace.library).filter(([key, definition]) => !definition.deleted && !teachingLibrary[key]),
+    ...(architecture ? Object.entries(teachingLibrary).filter(([, definition]) => (definition.sourceLevel ?? 0) < current) : []),
+  ]);
+  const replacementCandidates = replacementSource ? [...replacementPool.entries()]
+    .filter(([key, definition]) => key !== replacementNode?.componentKey && componentInterfacesMatch(replacementSource, definition))
+    .sort(([, left], [, right]) => left.name.localeCompare(right.name, 'zh-CN') || right.version - left.version) : [];
+  const openReplace = (nodeId: string) => { setReplaceTarget(nodeId); setReplacementKey(''); };
+  const applyReplacement = () => {
+    if (!replaceTarget || !replacementKey) return;
+    try {
+      const library: ComponentLibrary = { ...workspace.library };
+      const include = (key: string) => {
+        if (library[key] && !library[key].deleted) return;
+        const definition = teachingLibrary[key];
+        if (!definition || !architecture || (definition.sourceLevel ?? 0) >= current) throw new Error('替换组件当前不可用。');
+        library[key] = clone(definition);
+        definition.dependencies.forEach(include);
+      };
+      include(replacementKey);
+      const next = replaceComponentInstance(circuit, replaceTarget, replacementKey, library);
+      commit(next);
+      setWorkspace(value => ({ ...value, library }));
+      setReplaceTarget(null); setReplacementKey(''); notify('组件实例已替换。');
+    } catch (error) { notify((error as Error).message); }
+  };
 
   return <div className={`workshop ${temporal ? 'temporal-workshop' : ''} ${programming ? 'programming-workshop' : ''}`}>
     <aside className={`sidebar ${chapterOpen ? 'mobile-open' : ''}`}>
@@ -445,18 +530,20 @@ function Workshop() {
         <button className="close-sidebar tool-button" aria-label="关闭关卡目录" onClick={() => setChapterOpen(false)}><X size={18} /></button></div>
       <div className="library-tabs"><button className={!libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(false)}><BookOpen size={14} />关卡</button><button className={libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(true)}><Package size={14} />组件库 <small>{visibleLibraryEntries.length}</small></button></div>
       <div className="sidebar-scroll">
-      {!libraryTab ? <nav className="lesson-list" aria-label="关卡">
+      {!libraryTab ? <nav ref={restoreLevelScroll} className="lesson-list" aria-label="关卡" onScroll={event => { sidebarScrollPositions.current.levels = event.currentTarget.scrollTop; }}>
         {levels.map(item => <button key={item.id} className={`lesson ${item.id === current ? 'current' : ''}`} disabled={item.id > unlocked}
           aria-label={`第 ${item.id} 关 ${item.title}`} aria-current={item.id === current ? 'step' : undefined} onClick={() => changeLevel(item.id)}>
           <span className={`lesson-number ${workspace.proofs[item.id] ? 'completed' : ''}`}>{workspace.proofs[item.id] ? <Check size={14} /> : item.id > unlocked ? <LockKeyhole size={12} /> : String(item.id).padStart(2, '0')}</span>
           <span className="lesson-copy"><strong>{item.title}</strong><small>{item.caption}</small></span>
           {item.id === current && <ChevronRight size={15} />}
         </button>)}
-      </nav> : <section className="saved-components" aria-label="组件库">
+      </nav> : <section ref={restoreLibraryScroll} className="saved-components" aria-label="组件库" onScroll={event => { sidebarScrollPositions.current.library = event.currentTarget.scrollTop; }}>
         {visibleLibraryEntries.map(([key, definition]) => <div className="library-item" key={key}>
           <button className="component" aria-label={`添加组件 ${definition.name} v${definition.version}`} disabled={programming} draggable={!programming} onDragStart={e => e.dataTransfer.setData('application/logic-component', key)} onClick={() => placeComponent(key)}>
             <Package size={23} /><span><strong>{definition.name}</strong><small>v{definition.version} · {definition.inputs.length} 输入 / {definition.outputs.length} 输出</small></span><Plus size={15} /></button>
-          <button className="library-inspect" onClick={() => setInspect(definition)}>查看内部电路</button>
+          <div className="library-actions"><ToolButton label="查看内部电路" onClick={() => setInspect(definition)}><Eye size={14} /></ToolButton>
+            {!teachingLibrary[key] && <><ToolButton label={`重命名 ${definition.name} v${definition.version}`} onClick={() => openRename(key)}><Pencil size={13} /></ToolButton><ToolButton label={`删除 ${definition.name} v${definition.version}`} onClick={() => openDelete(key)}><Trash2 size={13} /></ToolButton></>}
+          </div>
         </div>)}
         {!visibleLibraryEntries.length && <p className="library-empty">组件库为空</p>}
       </section>}
@@ -464,7 +551,7 @@ function Workshop() {
       {architecture && paletteTab === 'teaching' && <section className="teaching-components palette-panel" aria-label="教学组件"><p>已学模块，可查看内部电路或使用自己的作品。</p>
         {Object.entries(teachingLibrary).filter(([, definition]) => (definition.sourceLevel ?? 0) < current).map(([key, definition]) => <div className="library-item" key={key}>
           <button className="component" aria-label={`添加教学组件 ${definition.name}`} draggable onDragStart={e => e.dataTransfer.setData('application/logic-component', key)} onClick={() => placeComponent(key)}><Package size={23} /><span><strong>{definition.name}</strong><small>{definition.inputs.length} 输入 / {definition.outputs.length} 输出</small></span><Plus size={15} /></button>
-          <button className="library-inspect" aria-label={`查看教学组件 ${definition.name}`} onClick={() => setInspect(definition)}>查看内部电路</button>
+          <div className="library-actions"><ToolButton label={`查看教学组件 ${definition.name}`} onClick={() => setInspect(definition)}><Eye size={14} /></ToolButton></div>
         </div>)}
       </section>}
       {!programming && (!architecture || paletteTab === 'available') && <div className="components-section palette-panel">{!architecture && <div className="sidebar-section-title"><Cable size={14} /><span>可用组件</span><span className="component-count">{level.allowed.length}</span></div>}
@@ -492,15 +579,16 @@ function Workshop() {
       <div className="editor-toolbar"><div className="toolbar-title"><span className="status-dot" />电路工作区<span className="toolbar-meta">{circuit.nodes.length - level.inputs.length - level.outputPorts.length} 元件 · {circuit.wires.length} 连接</span></div>
         <div className="edit-tools"><ToolButton label="撤销" onClick={undo} disabled={!currentHistory.past.length}><Undo2 size={17} /></ToolButton>
           <ToolButton label="重做" onClick={redo} disabled={!currentHistory.future.length}><Redo2 size={17} /></ToolButton>
-          <span className="tool-divider" /><ToolButton label="复制所选组件" onClick={duplicateSelected} disabled={!hasEditableSelection}><Copy size={16} /></ToolButton>
+          <span className="tool-divider" /><ToolButton label="复制所选组件" onClick={duplicateSelected} disabled={!hasEditableSelection || selectionUsesDeleted}><Copy size={16} /></ToolButton>
+          <ToolButton label="替换组件" disabled={!replaceableNode} onClick={() => { if (replaceableNode) openReplace(replaceableNode.id); }}><Replace size={16} /></ToolButton>
           <ToolButton label="删除所选" onClick={deleteSelected} disabled={programming || (!selection.wires.length && !hasEditableSelection)}><Trash2 size={16} /></ToolButton>
-          <ToolButton label="封装所选组件" onClick={() => openPackage('selection')} disabled={!hasEditableSelection}><Package size={16} /></ToolButton>
+          <ToolButton label="封装所选组件" onClick={() => openPackage('selection')} disabled={!hasEditableSelection || selectionUsesDeleted}><Package size={16} /></ToolButton>
           <ToolButton label={programming ? '清空当前程序' : '重置当前电路'} onClick={() => setResetOpen(true)}><RotateCcw size={16} /></ToolButton>
         </div><div className="run-tools">{temporal && <span className="clock-count" data-testid="clock-cycle"><Clock3 size={14} />周期 {simulation.state?.cycle ?? 0}</span>}
-          <ToolButton label={programming ? playing ? '暂停程序' : '运行程序' : temporal ? playing ? '暂停时钟' : '运行时钟' : playing ? '暂停用例' : '播放用例'} active={playing} disabled={!!busy || (programming && (programDirty || (!playing && simulation.pending)))} onClick={toggleRun}>{playing ? <Pause size={17} /> : <Play size={17} />}</ToolButton>
-          <ToolButton label={temporal ? '单步周期' : '下一组输入'} disabled={temporal && (simulation.pending || !!busy)} onClick={() => { setPlaying(false); step(); }}><StepForward size={18} /></ToolButton>
+          <ToolButton label={programming ? playing ? '暂停程序' : '运行程序' : temporal ? playing ? '暂停时钟' : '运行时钟' : playing ? '暂停用例' : '播放用例'} active={playing} disabled={hasDeletedComponents || !!busy || (programming && (programDirty || (!playing && simulation.pending)))} onClick={toggleRun}>{playing ? <Pause size={17} /> : <Play size={17} />}</ToolButton>
+          <ToolButton label={temporal ? '单步周期' : '下一组输入'} disabled={hasDeletedComponents || (temporal && (simulation.pending || !!busy))} onClick={() => { setPlaying(false); step(); }}><StepForward size={18} /></ToolButton>
           {temporal && <ToolButton label="清零状态" disabled={simulation.pending || !!busy} onClick={() => { setPlaying(false); setObservedStep(null); simulation.reset(); }}><RotateCcw size={16} /></ToolButton>}
-          {busy ? <button className="test-button" aria-label="取消后台任务" onClick={cancelTask}><X size={16} /><span>{busy}</span></button> : <button className="test-button" aria-label={programming ? '测试程序' : '测试电路'} disabled={programming && programDirty} onClick={() => void runTest()}><CircleCheck size={16} /><span>{programming ? '测试程序' : '测试电路'}</span></button>}
+          {busy ? <button className="test-button" aria-label="取消后台任务" onClick={cancelTask}><X size={16} /><span>{busy}</span></button> : <button className="test-button" aria-label={programming ? '测试程序' : '测试电路'} disabled={hasDeletedComponents || (programming && programDirty)} onClick={() => void runTest()}><CircleCheck size={16} /><span>{programming ? '测试程序' : '测试电路'}</span></button>}
           <button className="task-toggle tool-button" aria-label="查看任务" data-tooltip="查看任务" onClick={() => setTaskOpen(true)}><SlidersHorizontal size={18} /></button>
         </div>
       </div>
@@ -604,7 +692,7 @@ function Workshop() {
             </> : <div className="properties-section"><h3>所选对象</h3>{selectedNode ? <><h1>{selectedNode.label}</h1><dl><dt>类型</dt><dd>{selectedNode.type}</dd><dt>位宽</dt><dd>{selectedNode.type === 'COMPONENT' ? `${getPorts(selectedNode, workspace.library).inputs.map(p => p.bits).join(',')} → ${getPorts(selectedNode, workspace.library).outputs.map(p => p.bits).join(',')}` : selectedNode.bits ?? 1} bit</dd><dt>当前信号</dt><dd>{selectedNode.type === 'INPUT' ? inputs[selectedNode.id] : simulation.values[selectedNode.id] ?? 'X'}</dd><dt>位置</dt><dd>{Math.round(selectedNode.position.x)}, {Math.round(selectedNode.position.y)}</dd></dl>
                 {!programming && selectedNode.type === 'CONST' && <label className="property-input">常量值<input aria-label="常量值" type="number" min="0" max={2 ** (selectedNode.bits ?? 1) - 1} value={selectedNode.value ?? 0} onChange={e => { const value = Math.max(0, Math.min(2 ** (selectedNode.bits ?? 1) - 1, Math.trunc(Number(e.target.value)))); commit({ ...circuit, revision: circuit.revision + 1, nodes: circuit.nodes.map(n => n.id === selectedNode.id ? { ...n, value } : n) }); }} /></label>}
                 {!programming && selectedNode.type === 'ROM' && <button className="secondary-button" onClick={() => { setPlaying(false); setProgramId(selectedNode.id); }}>编辑 ROM 程序</button>}
-                {selectedNode.type === 'COMPONENT' && <><button className="secondary-button" onClick={() => setInspect(workspace.library[selectedNode.componentKey!])}><Package size={14} />查看内部电路</button><button className="secondary-button" onClick={() => { try { commit(expandComponent(circuit, selectedNode.id, workspace.library)); setSelection({ nodes: [], wires: [] }); } catch (error) { notify((error as Error).message); } }}><UnfoldHorizontal size={14} />展开组件</button></>}
+                {selectedNode.type === 'COMPONENT' && workspace.library[selectedNode.componentKey!]?.deleted ? <><p className="deleted-component-note">该组件已从组件库删除，请替换或移除此残留实例。</p><button className="secondary-button" onClick={() => openReplace(selectedNode.id)}><Replace size={14} />替换组件</button></> : selectedNode.type === 'COMPONENT' && <><button className="secondary-button" onClick={() => setInspect(workspace.library[selectedNode.componentKey!])}><Eye size={14} />查看内部电路</button><button className="secondary-button" onClick={() => { try { commit(expandComponent(circuit, selectedNode.id, workspace.library)); setSelection({ nodes: [], wires: [] }); } catch (error) { notify((error as Error).message); } }}><UnfoldHorizontal size={14} />展开组件</button><button className="secondary-button" onClick={() => openReplace(selectedNode.id)}><Replace size={14} />替换组件</button></>}
                 {programming || selectedNode.type === 'INPUT' || selectedNode.type === 'OUTPUT' || (selectedNode.id === 'program' && [38, 44].includes(current)) ? <p className="muted">关卡固定端口 / 程序存储器</p> : <button className="secondary-button" onClick={deleteSelected}><Trash2 size={14} />删除组件</button>}</>
                 : selectedWire ? <><h1>导线</h1><dl><dt>来源</dt><dd>{circuit.nodes.find(n => n.id === selectedWire.source)?.label}.{selectedWire.sourceHandle}</dd><dt>目标</dt><dd>{circuit.nodes.find(n => n.id === selectedWire.target)?.label}.{selectedWire.targetHandle}</dd><dt>信号</dt><dd>{simulation.wires[selectedWire.id]}</dd></dl>{!programming && <button className="secondary-button" onClick={deleteSelected}><Trash2 size={14} />删除导线</button>}</>
                 : <div className="empty-selection"><MousePointer2 size={26} /><p>未选择对象</p></div>}</div>}
@@ -616,6 +704,9 @@ function Workshop() {
     {(chapterOpen || taskOpen) && <button className="drawer-backdrop" aria-label="关闭侧栏" onClick={() => { setChapterOpen(false); setTaskOpen(false); }} />}
     {toast && <div className="toast" role="status"><CircleAlert size={16} /><span>{toast}</span><button aria-label="关闭通知" onClick={() => setToast('')}><X size={14} /></button></div>}
     {packageMode && <div className="modal-backdrop" onClick={() => setPackageMode(null)}><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="package-title" onClick={e => e.stopPropagation()}><Package size={24} /><h2 id="package-title">{packageMode === 'whole' ? '保存电路为组件' : '封装所选组件'}</h2><label className="property-input">组件名称<input autoFocus aria-label="组件名称" maxLength={60} value={componentName} onChange={e => setComponentName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveComponent(); if (e.key === 'Escape') setPackageMode(null); }} /></label><div><button className="secondary-button" onClick={() => setPackageMode(null)}>取消</button><button className="test-button" onClick={saveComponent}>保存组件</button></div></section></div>}
+    {renameTarget && <div className="modal-backdrop" onClick={() => setRenameTarget(null)}><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-component-title" onClick={e => e.stopPropagation()}><Pencil size={24} /><h2 id="rename-component-title">重命名组件</h2><label className="property-input">组件名称<input autoFocus aria-label="新的组件名称" maxLength={60} value={renameName} onChange={e => setRenameName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') applyRename(); if (e.key === 'Escape') setRenameTarget(null); }} /></label><p>关卡和其他组件中使用的此版本会同时更新名称。</p><div><button className="secondary-button" onClick={() => setRenameTarget(null)}>取消</button><button className="test-button" onClick={applyRename}>确认重命名</button></div></section></div>}
+    {deleteTarget && <div className="modal-backdrop" onClick={() => setDeleteTarget(null)}><section className="reset-dialog delete-component-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-component-title" onClick={e => e.stopPropagation()}><Trash2 size={24} /><h2 id="delete-component-title">删除组件？</h2><p>将删除以下组件版本：</p><ul>{deleteKeys.map(key => <li key={key}>{workspace.library[key].name} <small>v{workspace.library[key].version}</small></li>)}</ul>{deleteKeys.length > 1 && <p>其中 {deleteKeys.length - 1} 个组件依赖当前组件，因此会一并删除。</p>}<p>关卡中已放置的实例和连线会保留并标红，直到你手动移除。</p><div><button autoFocus className="secondary-button" onClick={() => setDeleteTarget(null)}>取消</button><button className="danger-button" onClick={applyDelete}>确认删除</button></div></section></div>}
+    {replaceTarget && <div className="modal-backdrop" onClick={() => setReplaceTarget(null)}><section className="replace-component-dialog" role="dialog" aria-modal="true" aria-labelledby="replace-component-title" onClick={e => e.stopPropagation()}><header><div><Replace size={20} /><h2 id="replace-component-title">替换组件</h2></div><ToolButton label="关闭替换组件" onClick={() => setReplaceTarget(null)}><X size={18} /></ToolButton></header><p>选择接口相同的组件。原实例的位置和连线将保持不变。</p><div className="replacement-list">{replacementCandidates.map(([key, definition]) => <button key={key} className={replacementKey === key ? 'chosen' : ''} onClick={() => setReplacementKey(key)}><Package size={20} /><span><strong>{definition.name}</strong><small>v{definition.version} · {definition.inputs.length} 输入 / {definition.outputs.length} 输出</small></span>{replacementKey === key && <Check size={16} />}</button>)}{!replacementCandidates.length && <div className="replacement-empty">没有接口兼容的可用组件</div>}</div><footer><button className="secondary-button" onClick={() => setReplaceTarget(null)}>取消</button><button className="test-button" disabled={!replacementKey} onClick={applyReplacement}>确认替换</button></footer></section></div>}
     {inspect && <div className="modal-backdrop" onClick={() => setInspect(null)}><section className="component-dialog" role="dialog" aria-modal="true" aria-label="组件内部电路" onClick={e => e.stopPropagation()}><header><h2>{inspect.name} <small>v{inspect.version}</small></h2><ToolButton label="关闭组件详情" onClick={() => setInspect(null)}><X size={18} /></ToolButton></header><div className="component-interfaces"><span>输入 {inspect.inputs.map(p => `${p.label}:${p.bits}`).join(' · ')}</span><span>输出 {inspect.outputs.map(p => `${p.label}:${p.bits}`).join(' · ')}</span></div>
       <div className="component-preview"><ComponentPreview definition={inspect} library={inspectionLibrary} /></div>
       <footer>{inspect.dependencies.length ? <span>依赖 {inspect.dependencies.map(key => inspectionLibrary[key]?.name ?? key).join(' · ')}</span> : <span>{inspect.graph.nodes.filter(n => n.type !== 'INPUT' && n.type !== 'OUTPUT').length} 个元件</span>}</footer></section></div>}

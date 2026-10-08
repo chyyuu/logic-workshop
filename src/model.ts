@@ -79,6 +79,8 @@ export function validateLibrary(library: ComponentLibrary): string[] {
     if (!def || typeof def!=='object') { errors.push('组件定义无效。');continue; }
     if (typeof def.id!=='string'||!def.id||!Number.isInteger(def.version)||def.version<1||key!==`${def.id}@${def.version}`||typeof def.name!=='string'||!def.name.trim()||def.name.length>60) errors.push('组件版本或名称无效。');
     if (!Array.isArray(def.inputs)||!Array.isArray(def.outputs)||!Array.isArray(def.dependencies)||!def.graph) { errors.push('组件接口无效。');continue; }
+    if (def.deleted !== undefined && def.deleted !== true) errors.push('组件删除状态无效。');
+    if (!def.deleted && def.dependencies.some(dependency => library[dependency]?.deleted)) errors.push('可用组件不能依赖已删除组件。');
     const interfacePorts=[...def.inputs,...def.outputs];
     if (!def.outputs.length||interfacePorts.length>32||interfacePorts.some(p=>!p||typeof p.id!=='string'||!p.id||p.id.length>160||p.id.includes(':')||typeof p.label!=='string'||![1,2,4,8,16].includes(p.bits))) { errors.push('组件接口无效。');continue; }
     if (new Set(interfacePorts.map(p=>p.id)).size!==interfacePorts.length) errors.push('组件接口无效。');
@@ -148,6 +150,7 @@ export function addGate(circuit:Circuit,type:GateType,position:CircuitNode['posi
 }
 export function addComponent(circuit:Circuit,key:string,position:CircuitNode['position'],library:ComponentLibrary,id=createId('c')): Circuit {
   const def=library[key];if(!def)throw new Error('组件依赖缺失。');
+  if(def.deleted)throw new Error('组件已删除，不能继续使用。');
   const next={...circuit,revision:circuit.revision+1,nodes:[...circuit.nodes,{id,type:'COMPONENT' as const,label:def.name,componentKey:key,position}]};
   const error=validateCircuit(next,library)[0];if(error)throw new Error(error);return next;
 }

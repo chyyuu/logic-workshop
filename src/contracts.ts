@@ -13,7 +13,7 @@ export interface CircuitGraph { nodes: CircuitNode[]; wires: Wire[]; }
 export interface Circuit extends CircuitGraph { levelId: number; revision: number; }
 export interface ComponentDefinition {
   id: string; version: number; name: string; inputs: Port[]; outputs: Port[];
-  graph: CircuitGraph; dependencies: string[]; sourceLevel?: number;
+  graph: CircuitGraph; dependencies: string[]; sourceLevel?: number; deleted?: true;
 }
 export type ComponentLibrary = Record<string, ComponentDefinition>;
 export interface RuntimeState { registers: Record<string, Signal>; cycle: number; memories?: Record<string, Signal[]>; }

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, useReactFlow, type Connection, type NodeChange, type EdgeChange } from '@xyflow/react';
 import { CircuitBoard, Check, ChevronRight, ArrowRight, Undo2, Redo2, Trash2, RotateCcw, Play, Pause, StepForward,
   ZoomIn, ZoomOut, Maximize, Download, Upload, LockKeyhole, Lightbulb, X, CircleCheck, CircleAlert,
   Menu, SlidersHorizontal, Cable, Plus, BookOpen, MousePointer2, Copy, Package, UnfoldHorizontal, ChevronLeft, Clock3, Pencil, Eye, Replace } from 'lucide-react';
 import { addGate, addComponent, getPorts, validateCircuit, connect, canConnect, createCircuit, removeSelection, type Circuit } from './model';
-import { levels, getLevel, testInputs, testSequences, type GateType, type Inputs } from './levels';
+import { chapters, levels, getLevel, testInputs, testSequences, type GateType, type Inputs } from './levels';
 import type { TestResult, ComponentDefinition, ComponentLibrary } from './contracts';
 import { encapsulateSelection, expandComponent, packageCircuit } from './components';
 import { backgroundTask, useSimulation } from './workerClient';
@@ -45,6 +45,9 @@ function Workshop() {
   const temporal = level.mode === 'sequential' || programming;
   const architecture = level.chapter === 6;
   const teachingLibrary = useMemo(architectureLibrary, []);
+  const chapterGroups = useMemo(() => chapters.map((title, index) => ({
+    number: index + 1, title, lessons: levels.filter(item => item.chapter === index + 1),
+  })), []);
   const inspectionLibrary = useMemo(() => ({ ...teachingLibrary, ...workspace.library }), [teachingLibrary, workspace.library]);
   const inputs = workspace.inputs[current];
   const [history, setHistory] = useState<Record<number, { past: Circuit[]; future: Circuit[] }>>({});
@@ -531,12 +534,20 @@ function Workshop() {
       <div className="library-tabs"><button className={!libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(false)}><BookOpen size={14} />关卡</button><button className={libraryTab ? 'chosen' : ''} onClick={() => setLibraryTab(true)}><Package size={14} />组件库 <small>{visibleLibraryEntries.length}</small></button></div>
       <div className="sidebar-scroll">
       {!libraryTab ? <nav ref={restoreLevelScroll} className="lesson-list" aria-label="关卡" onScroll={event => { sidebarScrollPositions.current.levels = event.currentTarget.scrollTop; }}>
-        {levels.map(item => <button key={item.id} className={`lesson ${item.id === current ? 'current' : ''}`} disabled={item.id > unlocked}
-          aria-label={`第 ${item.id} 关 ${item.title}`} aria-current={item.id === current ? 'step' : undefined} onClick={() => changeLevel(item.id)}>
-          <span className={`lesson-number ${workspace.proofs[item.id] ? 'completed' : ''}`}>{workspace.proofs[item.id] ? <Check size={14} /> : item.id > unlocked ? <LockKeyhole size={12} /> : String(item.id).padStart(2, '0')}</span>
-          <span className="lesson-copy"><strong>{item.title}</strong><small>{item.caption}</small></span>
-          {item.id === current && <ChevronRight size={15} />}
-        </button>)}
+        {chapterGroups.map(group => <Fragment key={group.number}>
+          <div className={`lesson-chapter ${group.number === level.chapter ? 'active' : ''}`}>
+            <span>第 {group.number} 章</span><strong>{group.title}</strong>
+            <small>{String(group.lessons[0].id).padStart(2, '0')}–{String(group.lessons.at(-1)!.id).padStart(2, '0')}</small>
+          </div>
+          {group.lessons.map(item => <button key={item.id} className={`lesson ${item.id === current ? 'current' : ''}`} disabled={item.id > unlocked}
+            aria-label={`第 ${item.id} 关 ${item.title}`} aria-current={item.id === current ? 'step' : undefined} onClick={() => changeLevel(item.id)}>
+            <span className={`lesson-number ${workspace.proofs[item.id] ? 'completed' : ''}`}>
+              {item.id > unlocked ? <LockKeyhole size={12} /> : String(item.id).padStart(2, '0')}
+            </span>
+            <span className="lesson-copy"><strong>{item.title}</strong><small>{item.caption}</small></span>
+            {item.id === current && <ChevronRight size={15} />}
+          </button>)}
+        </Fragment>)}
       </nav> : <section ref={restoreLibraryScroll} className="saved-components" aria-label="组件库" onScroll={event => { sidebarScrollPositions.current.library = event.currentTarget.scrollTop; }}>
         {visibleLibraryEntries.map(([key, definition]) => <div className="library-item" key={key}>
           <button className="component" aria-label={`添加组件 ${definition.name} v${definition.version}`} disabled={programming} draggable={!programming} onDragStart={e => e.dataTransfer.setData('application/logic-component', key)} onClick={() => placeComponent(key)}>
@@ -607,7 +618,6 @@ function Workshop() {
               isValidConnection={conn => !!conn.sourceHandle && !!conn.targetHandle && canConnect(circuit, conn.source, conn.sourceHandle, conn.target, conn.targetHandle, workspace.library)}
               onConnectEnd={(_e, state) => { if (!state.isValid && state.toHandle) notify('连接无效：输入已有驱动或会形成反馈回路。'); }}
               onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-              onEdgeClick={(event, edge) => { event.stopPropagation(); setSelection(previous => ({ nodes: event.shiftKey ? previous.nodes : [], wires: event.shiftKey ? [...new Set([...previous.wires, edge.id])] : [edge.id] })); }}
               onNodeDragStart={() => { dragBefore.current = clone(circuit); }}
               onNodeDragStop={(_event, _node, draggedNodes) => {
                 const before = dragBefore.current; dragBefore.current = null;
@@ -620,7 +630,7 @@ function Workshop() {
               onDrop={event => { event.preventDefault(); const position = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }); const type = event.dataTransfer.getData('application/logic-gate') as GateType; const key = event.dataTransfer.getData('application/logic-component'); if (level.allowed.includes(type)) add(type, position); if (key) placeComponent(key, position); }}
               onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
               fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.08} maxZoom={1.6} snapToGrid snapGrid={[10, 10]}
-              panOnDrag={[1, 2]} selectionOnDrag deleteKeyCode={null} multiSelectionKeyCode="Shift"
+              panOnDrag={[1, 2]} selectionOnDrag selectionKeyCode={null} deleteKeyCode={null} multiSelectionKeyCode="Shift"
               defaultEdgeOptions={{ type: 'wire' }} attributionPosition="bottom-left">
               <Background variant={BackgroundVariant.Dots} color="#cbd2d7" gap={20} size={1.1} />
             </ReactFlow>}
